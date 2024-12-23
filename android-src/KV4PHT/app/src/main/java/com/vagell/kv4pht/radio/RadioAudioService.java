@@ -307,7 +307,7 @@ public class RadioAudioService extends Service {
     }
 
     public static void setMaxFreq(int newMaxFreq) {
-        maxFreq = newMaxFreq;
+       // maxFreq = newMaxFreq;
     }
 
     public void setMode(int mode) {
@@ -515,11 +515,12 @@ public class RadioAudioService extends Service {
 
         try {
             Float freq = Float.parseFloat(activeFrequencyStr);
-            if (freq < 144.0f || freq > maxFreq) {
+           callbacks.txAllowed(true);
+            /*if (freq < 144.0f || freq > maxFreq) {
                 callbacks.txAllowed(false);
             } else {
                 callbacks.txAllowed(true);
-            }
+            }*/
         } catch (NumberFormatException nfe) {
         }
     }
@@ -529,16 +530,16 @@ public class RadioAudioService extends Service {
         try {
             freq = Float.parseFloat(strFreq);
         } catch (NumberFormatException nfe) { // Not sure how some people are breaking this, but default to FM calling frequency if we can't understand strFreq.
-            return "144.0000";
+            return "130.4250";
         }
-        while (freq > 500.0f) { // Handle cases where user inputted "1467" or "14670" but meant "146.7".
+        while (freq > 5000.0f) { // Handle cases where user inputted "1467" or "14670" but meant "146.7".
             freq /= 10;
         }
 
-        if (freq < 134.0f) {
-            freq = 134.0f; // Lowest freq supported by radio module
-        } else if (freq > 174.0f) {
-            freq = 174.0f; // Highest freq supported
+        if (freq < 130f) {
+            freq = 	130f; // Lowest freq supported by radio module
+        } else if (freq > 480.0f) {
+            freq = 480.0f; // Highest freq supported
         }
 
         strFreq = String.format(java.util.Locale.US,"%.4f", freq);
@@ -607,11 +608,12 @@ public class RadioAudioService extends Service {
 
         try {
             Float txFreq = Float.parseFloat(getTxFreq(memory.frequency, memory.offset));
-            if (txFreq < 144.0f || txFreq > maxFreq) {
+           callbacks.txAllowed(true);
+            /*if (txFreq < 144.0f || txFreq > maxFreq) {
                 callbacks.txAllowed(false);
             } else {
                 callbacks.txAllowed(true);
-            }
+            }*/
         } catch (NumberFormatException nfe) {
         }
     }
