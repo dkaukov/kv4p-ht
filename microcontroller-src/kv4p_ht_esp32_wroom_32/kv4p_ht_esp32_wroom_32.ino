@@ -78,7 +78,7 @@ boolean isTxCacheSatisfied = false; // Will be true when the DAC has enough cach
 #define LED_PIN 2
 
 // Object used for radio module serial comms
-DRA818* dra = new DRA818(&Serial2, DRA818_UHF);
+DRA818* dra = new DRA818(&Serial2, SA868_UHF);
 
 // Tx runaway detection stuff
 long txStartTime = -1;
@@ -113,15 +113,7 @@ void processTxAudio(uint8_t tempBuffer[], int bytesRead);
 void iir_lowpass_reset();
 
 void setup() {
-  
-  for (int pin = 0; pin <= 39; pin++) {
-    if (pin != 6 && pin != 7 && pin != 8 && pin != 9 && pin != 10 && pin != 11) {  
-      // Skip flash pins (6-11)
-      pinMode(pin, INPUT_PULLUP);
-    }
-  }
-
-    // Communication with Android via USB cable
+  // Communication with Android via USB cable
   Serial.begin(baudRate);
   Serial.setRxBufferSize(USB_BUFFER_SIZE);
   Serial.setTxBufferSize(USB_BUFFER_SIZE);
