@@ -53,9 +53,6 @@ uint32_t txAudioSampleRate = 44100 * 1.22; // Ditto
 int baudRate = 921600; // Variable because may be dynamic / configurable in the future.
 
 // Buffer for outgoing audio bytes to send to radio module
-#define TX_TEMP_AUDIO_BUFFER_SIZE 4096 // Holds data we already got off of USB serial from Android app
-#define TX_CACHED_AUDIO_BUFFER_SIZE 1024 // MUST be smaller than DMA buffer size specified in i2sTxConfig, because we dump this cache into DMA buffer when full.
-uint8_t txCachedAudioBuffer[TX_CACHED_AUDIO_BUFFER_SIZE] = {0};
 int txCachedAudioBytes = 0;
 boolean isTxCacheSatisfied = false; // Will be true when the DAC has enough cached tx data to avoid any stuttering (i.e. at least TX_CACHED_AUDIO_BUFFER_SIZE bytes).
 
@@ -89,7 +86,7 @@ bool i2sStarted = false;
 
 // I2S audio sampling stuff
 #define I2S_READ_LEN      32
-#define I2S_WRITE_LEN     1024
+#define I2S_WRITE_LEN     256
 #define I2S_ADC_UNIT      ADC_UNIT_1
 #define I2S_ADC_CHANNEL   ADC1_CHANNEL_6
 
@@ -115,7 +112,7 @@ void iir_lowpass_reset();
 void setup() {
   // Communication with Android via USB cable
   Serial.begin(baudRate);
-  Serial.setRxBufferSize(USB_BUFFER_SIZE);
+  Serial.setRxBufferSize(4096);
   Serial.setTxBufferSize(USB_BUFFER_SIZE);
 
   // Configure watch dog timer (WDT), which will reset the system if it gets stuck somehow.
@@ -193,14 +190,15 @@ void initI2STx() {
       .sample_rate = txAudioSampleRate,
       .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
       .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
-      .intr_alloc_flags = 0,
-      .dma_buf_count = 8,
+      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+      .dma_buf_count = 14,
       .dma_buf_len = I2S_WRITE_LEN,
       .use_apll = true
   };
 
   i2s_driver_install(I2S_NUM_0, &i2sTxConfig, 0, NULL);
-  i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);           
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN); 
+  i2s_zero_dma_buffer(I2S_NUM_0);          
 }
 
 
@@ -479,64 +477,50 @@ void loop() {
         esp_task_wdt_reset();
         return;
       }
+      int16_t audioBuffer[I2S_WRITE_LEN];
+      uint8_t serialBuffer[I2S_WRITE_LEN]; 
+      size_t bytesRead = Serial.read(serialBuffer, I2S_WRITE_LEN);
+      // Convert the uint8_t data to int16_t
+      for (size_t i = 0; i < bytesRead; i++) {
+        audioBuffer[i] = ((int16_t)serialBuffer[i]) << 8;
+      }
+      // Write the converted buffer to the DAC
+      size_t bytes_written;
+      ESP_ERROR_CHECK(i2s_write(I2S_NUM_0, audioBuffer, bytesRead << 1, &bytes_written, portMAX_DELAY));
 
-      // Check for incoming commands or audio from Android
-      int bytesRead = 0;
-      uint8_t tempBuffer[TX_TEMP_AUDIO_BUFFER_SIZE];
-      int bytesAvailable = Serial.available();
-      if (bytesAvailable > 0) {
-        bytesRead = Serial.readBytes(tempBuffer, bytesAvailable);
-
-        // Pre-cache transmit audio to ensure precise timing (required for any data encoding to work, such as BFSK).
-        if (!isTxCacheSatisfied) {
-          if (txCachedAudioBytes + bytesRead >= TX_CACHED_AUDIO_BUFFER_SIZE) {
-            isTxCacheSatisfied = true;
-            processTxAudio(txCachedAudioBuffer, txCachedAudioBytes); // Process cached bytes
-          } else {
-            memcpy(txCachedAudioBuffer + txCachedAudioBytes, tempBuffer, bytesRead); // Store bytes to cache
-            txCachedAudioBytes += bytesRead;
+      for (int i = 0; i < bytesRead; i++) {
+        // If we've seen the entire delimiter...
+        if (matchedDelimiterTokens == DELIMITER_LENGTH) {
+          // Process next byte as a command.
+          uint8_t command = serialBuffer[i];
+          matchedDelimiterTokens = 0;
+          switch (command) {
+            case COMMAND_STOP:
+            {
+              delay(MS_WAIT_BEFORE_PTT_UP); // Wait just a moment so final tx audio data in DMA buffer can be transmitted.
+              setMode(MODE_STOPPED);
+              esp_task_wdt_reset();
+              return;
+            }
+              break;
+            case COMMAND_PTT_UP:
+            {
+              delay(MS_WAIT_BEFORE_PTT_UP); // Wait just a moment so final tx audio data in DMA buffer can be transmitted.
+              setMode(MODE_RX);
+              esp_task_wdt_reset();
+              return;
+            }
+              break;
           }
-        } 
-
-        if (isTxCacheSatisfied) { // Note that it may have JUST been satisfied above, in which case we processed the cache, and will now process tempBuffer.
-          processTxAudio(tempBuffer, bytesRead);
-        }
-
-        for (int i = 0; i < bytesRead && i < TX_TEMP_AUDIO_BUFFER_SIZE; i++) {
-          // If we've seen the entire delimiter...
-          if (matchedDelimiterTokens == DELIMITER_LENGTH) {
-            // Process next byte as a command.
-            uint8_t command = tempBuffer[i];
+        } else {
+          if (serialBuffer[i] == delimiter[matchedDelimiterTokens]) { // This byte may be part of the delimiter
+            matchedDelimiterTokens++;
+          } else { // This byte is not consistent with the command delimiter, reset counter
             matchedDelimiterTokens = 0;
-            switch (command) {
-              case COMMAND_STOP:
-              {
-                delay(MS_WAIT_BEFORE_PTT_UP); // Wait just a moment so final tx audio data in DMA buffer can be transmitted.
-                setMode(MODE_STOPPED);
-                esp_task_wdt_reset();
-                return;
-              }
-                break;
-              case COMMAND_PTT_UP:
-              {
-                delay(MS_WAIT_BEFORE_PTT_UP); // Wait just a moment so final tx audio data in DMA buffer can be transmitted.
-                setMode(MODE_RX);
-                esp_task_wdt_reset();
-                return;
-              }
-                break;
-            }
-          } else {
-            if (tempBuffer[i] == delimiter[matchedDelimiterTokens]) { // This byte may be part of the delimiter
-              matchedDelimiterTokens++;
-            } else { // This byte is not consistent with the command delimiter, reset counter
-              matchedDelimiterTokens = 0;
-            }
           }
         }
       }
     }
-
     // Regularly reset the WDT timer to prevent the device from rebooting (prove we're not locked up).
     esp_task_wdt_reset();
   }
@@ -579,25 +563,4 @@ void setMode(int newMode) {
       isTxCacheSatisfied = false;
       break;
   }
-}
-
-void processTxAudio(uint8_t tempBuffer[], int bytesRead) {
-  if (bytesRead == 0) {
-    return;
-  }
-
-  // Convert the 8-bit audio data to 16-bit
-  uint8_t buffer16[bytesRead * 2] = {0};
-  for (int i = 0; i < bytesRead; i++) {
-    buffer16[i * 2 + 1] = tempBuffer[i]; // Move 8-bit audio into top 8 bits of 16-bit byte that I2S expects.
-  }
-
-  size_t totalBytesWritten = 0;
-  size_t bytesWritten;
-  size_t bytesToWrite = sizeof(buffer16);
-  do {
-    ESP_ERROR_CHECK(i2s_write(I2S_NUM_0, buffer16 + totalBytesWritten, bytesToWrite, &bytesWritten, 100)); 
-    totalBytesWritten += bytesWritten;
-    bytesToWrite -= bytesWritten;
-  } while (bytesToWrite > 0);
 }
