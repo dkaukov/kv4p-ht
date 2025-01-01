@@ -241,7 +241,6 @@ int16_t remove_dc(int16_t x) {
     return x - iir_lowpass(x);
 }
 
-
 void parseSSI() {
   static char buf[5];
   if (dra->serial->available()){
@@ -494,11 +493,12 @@ void loop() {
 
          buffer16[i] = (int32_t)remove_dc(((2048 - (uint16_t(buffer16[i]) & 0xfff)) << 4)) * attenuation >> 8;
       }
+
       Serial.write((uint8_t*)buffer16, bytesRead);
+
       // If it's been a while since our last S-meter report, send one back to Android app.
       if ((millis() - lastSMeterReport) >= SMETER_REPORT_INTERVAL_MS) {
         dra->serial->write("RSSI?\r\n");
-        //dra->rssi();
         lastSMeterReport = millis();
       }
       parseSSI();
