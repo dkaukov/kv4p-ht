@@ -11,6 +11,7 @@ public class RxStreamParser {
     private byte command;
     private byte commandParamLen;
     private final ByteArrayOutputStream commandParams = new ByteArrayOutputStream();
+    private final ByteArrayOutputStream lookaheadBuffer = new ByteArrayOutputStream();
 
     private final BiConsumer<Byte, byte[]> onCommand;
 
@@ -21,40 +22,44 @@ public class RxStreamParser {
     public byte[] extractAudioAndHandleCommands(byte[] newData) {
         ByteArrayOutputStream audioOut = new ByteArrayOutputStream();
         for (byte b : newData) {
+            lookaheadBuffer.write(b);
             if (matchedDelimiterTokens < COMMAND_DELIMITER.length) {
-                // Matching delimiter
                 if (b == COMMAND_DELIMITER[matchedDelimiterTokens]) {
                     matchedDelimiterTokens++;
                 } else {
-                    // If partial delimiter exists, flush to audio
-                    if (matchedDelimiterTokens > 0) {
-                        audioOut.write(COMMAND_DELIMITER, 0, matchedDelimiterTokens);
-                    }
-                    audioOut.write(b);  // Write the audio byte
+                    flushLookaheadBuffer(audioOut);
                     matchedDelimiterTokens = 0;
                 }
             } else if (matchedDelimiterTokens == COMMAND_DELIMITER.length) {
-                // After full delimiter, expect command byte
                 command = b;
                 matchedDelimiterTokens++;
             } else if (matchedDelimiterTokens == COMMAND_DELIMITER.length + 1) {
-                // Expect length byte after command
                 commandParamLen = b;
                 commandParams.reset();
                 matchedDelimiterTokens++;
             } else {
-                // Collect command parameters
                 commandParams.write(b);
                 matchedDelimiterTokens++;
-                // Once full parameter is received, process the command
+                lookaheadBuffer.reset();
                 if (commandParams.size() == commandParamLen) {
                     onCommand.accept(command, commandParams.toByteArray());
-                    matchedDelimiterTokens = 0;
-                    commandParamLen = 0;
+                    resetParser(audioOut);
                 }
             }
         }
-        // Return any audio processed so far
         return audioOut.toByteArray();
+    }
+
+    private void flushLookaheadBuffer(ByteArrayOutputStream audioOut) {
+        byte[] buffer = lookaheadBuffer.toByteArray();
+        audioOut.write(buffer, 0, buffer.length);
+        lookaheadBuffer.reset();
+    }
+
+    private void resetParser(ByteArrayOutputStream audioOut) {
+        flushLookaheadBuffer(audioOut);
+        matchedDelimiterTokens = 0;
+        commandParams.reset();
+        commandParamLen = 0;
     }
 }

@@ -250,9 +250,9 @@ void parseSSI() {
     buf[3] = buf[4];
     buf[4] = dra->serial->read();  
     if ((buf[4] == 0xA)) {
-      uint8_t rssiInt = ( (buf[0]-'0')*100 + (buf[1]-'0')*10 + (buf[2]-'0') ); // convert RSSI measurement to int
+      uint16_t rssiInt = ( (buf[0]-'0')*100 + (buf[1]-'0')*10 + (buf[2]-'0') ); // convert RSSI measurement to int
       if (rssiInt >= 0 && rssiInt <= 255) {
-        sendCmdToAndroid(COMMAND_SMETER_REPORT, &rssiInt, /* paramsLen */ 1);
+        sendCmdToAndroid(COMMAND_SMETER_REPORT, (uint8_t*)&rssiInt, sizeof(rssiInt));
       }
     }  
   }
@@ -597,7 +597,6 @@ void sendCmdToAndroid(byte cmdByte, const byte* params, size_t paramsLen) {
     Serial.write(&len, 1);
     // 4. Parameter bytes
     Serial.write(params, paramsLen);
-    Serial.flush();
 }
 
 void tuneTo(float freqTx, float freqRx, int tone, int squelch, String bandwidth) {
