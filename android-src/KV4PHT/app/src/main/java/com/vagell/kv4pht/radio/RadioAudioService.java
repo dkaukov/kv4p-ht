@@ -283,7 +283,7 @@ public class RadioAudioService extends Service {
     }
 
     public static void setMaxFreq(int newMaxFreq) {
-        maxFreq = newMaxFreq;
+       // maxFreq = newMaxFreq;
     }
 
     public void setAprsBeaconPosition(boolean aprsBeaconPosition) {
@@ -540,13 +540,12 @@ public class RadioAudioService extends Service {
 
         try {
             Float freq = Float.parseFloat(activeFrequencyStr);
-            Float offsetMaxFreq = maxFreq - (bandwidth.equals("W") ? 0.025f : 0.0125f);
-            if (freq < 144.0f || freq > offsetMaxFreq) {
-                txAllowed = false;
+           callbacks.txAllowed(true);
+            /*if (freq < 144.0f || freq > maxFreq) {
+                callbacks.txAllowed(false);
             } else {
-                txAllowed = true;
-            }
-            callbacks.txAllowed(txAllowed);
+                callbacks.txAllowed(true);
+            }*/
         } catch (NumberFormatException nfe) {
         }
     }
@@ -558,14 +557,14 @@ public class RadioAudioService extends Service {
         } catch (NumberFormatException nfe) {
             return "144.0000";
         }
-        while (freq > 500.0f) { // Handle cases where user inputted "1467" or "14670" but meant "146.7".
+        while (freq > 5000.0f) { // Handle cases where user inputted "1467" or "14670" but meant "146.7".
             freq /= 10;
         }
 
-        if (freq < 134.0f) {
-            freq = 134.0f; // Lowest freq supported by radio module
-        } else if (freq > 174.0f) {
-            freq = 174.0f; // Highest freq supported
+        if (freq < 130f) {
+            freq = 	130f; // Lowest freq supported by radio module
+        } else if (freq > 480.0f) {
+            freq = 480.0f; // Highest freq supported
         }
 
         strFreq = String.format(java.util.Locale.US,"%.4f", freq);
@@ -631,13 +630,12 @@ public class RadioAudioService extends Service {
 
         try {
             Float txFreq = Float.parseFloat(getTxFreq(memory.frequency, memory.offset));
-            Float offsetMaxFreq = maxFreq - (bandwidth.equals("W") ? 0.025f : 0.0125f);
-            if (txFreq < 144.0f || txFreq > offsetMaxFreq) {
-                txAllowed = false;
+           callbacks.txAllowed(true);
+            /*if (txFreq < 144.0f || txFreq > maxFreq) {
+                callbacks.txAllowed(false);
             } else {
-                txAllowed = true;
-            }
-            callbacks.txAllowed(txAllowed);
+                callbacks.txAllowed(true);
+            }*/
         } catch (NumberFormatException nfe) {
         }
     }

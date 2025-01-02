@@ -87,7 +87,7 @@ boolean isTxCacheSatisfied = false; // Will be true when the DAC has enough cach
 #define LED_PIN 2
 
 // Object used for radio module serial comms
-DRA818* dra = new DRA818(&Serial2, DRA818_VHF);
+DRA818* dra = new DRA818(&Serial2, SA868_UHF);
 
 // Tx runaway detection stuff
 long txStartTime = -1;
