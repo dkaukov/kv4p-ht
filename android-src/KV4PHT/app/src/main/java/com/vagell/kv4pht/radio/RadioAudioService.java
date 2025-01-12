@@ -703,6 +703,8 @@ public class RadioAudioService extends Service {
 
     public void startPtt() {
         if (!txAllowed) { // Extra precauation, though MainActivity should enforce this.
+            Log.d("DEBUG", "Warning: Attempted startPtt when txAllowed was false (should not happen).");
+            new Throwable().printStackTrace();
             return;
         }
 

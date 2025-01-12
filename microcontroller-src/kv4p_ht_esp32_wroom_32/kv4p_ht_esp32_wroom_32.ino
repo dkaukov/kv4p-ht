@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <driver/dac.h>
 #include <esp_task_wdt.h>
 
-const byte FIRMWARE_VER[8] = {'0', '0', '0', '0', '0', '0', '0', '6'}; // Should be 8 characters representing a zero-padded version, like 00000001.
+const byte FIRMWARE_VER[8] = {'0', '0', '0', '0', '0', '0', '0', '7'}; // Should be 8 characters representing a zero-padded version, like 00000001.
 const byte VERSION_PREFIX[7] = {'V', 'E', 'R', 'S', 'I', 'O', 'N'}; // Must match RadioAudioService.VERSION_PREFIX in Android app.
 
 // Commands defined here must match the Android app
@@ -344,26 +344,25 @@ void loop() {
       while (Serial.available()) {
         uint8_t inByte = Serial.read();        
         if (matchedDelimiterTokensRx < DELIMITER_LENGTH) {
-            if (inByte == COMMAND_DELIMITER[matchedDelimiterTokensRx]) { // This byte may be part of the delimiter
+            // Match delimiter sequence
+            if (inByte == COMMAND_DELIMITER[matchedDelimiterTokensRx]) {
               matchedDelimiterTokensRx++;
-            } else { // This byte is not consistent with the command delimiter, reset counter
-              matchedDelimiterTokensRx = 0;
+            } else {
+              matchedDelimiterTokensRx = 0; // Reset on mismatch
             }
         } else {
-           switch (inByte) {
+          matchedDelimiterTokensRx = 0;
+          switch (inByte) {
             case COMMAND_STOP: 
-              matchedDelimiterTokensRx = 0;
               setMode(MODE_STOPPED);
               Serial.flush();
               esp_task_wdt_reset();
               return;
             case COMMAND_PTT_DOWN: 
-              matchedDelimiterTokensRx = 0;
               setMode(MODE_TX);
               esp_task_wdt_reset();
               return;
             case COMMAND_TUNE_TO: {
-            
               // If we haven't received all the parameters needed for COMMAND_TUNE_TO, wait for them before continuing.
               // This can happen if ESP32 has pulled part of the command+params from the buffer before Android has completed
               // putting them in there. If so, we take byte-by-byte until we get the full params.
@@ -395,7 +394,6 @@ void loop() {
               int squelchInt = paramsStr.substring(18, 19).toInt();
               String bandwidth = paramsStr.substring(19, 20);
               tuneTo(freqTxFloat, freqRxFloat, toneInt, squelchInt, bandwidth);
-              matchedDelimiterTokensRx = 0;
             }
               break;
             case COMMAND_FILTERS: {
@@ -422,16 +420,14 @@ void loop() {
               bool lowpass = (paramsStr.charAt(2) == '1');
 
               dra->filters(emphasis, highpass, lowpass);
-              matchedDelimiterTokensRx = 0;
             }
               break;
             default:
-              matchedDelimiterTokensRx = 0;
               break;
           }
         }
       }
-
+ 
       // If it's been a while since our last S-meter report, send one back to Android app.
       if ((millis() - lastSMeterReport) >= SMETER_REPORT_INTERVAL_MS) {
         // TODO fix the dra818 library's implementation of rssi(). Right now it just drops the
@@ -448,10 +444,13 @@ void loop() {
           if (rssiInt >= 0 && rssiInt <= 255) {
             byte params[1] = { (uint8_t) rssiInt };
             sendCmdToAndroid(COMMAND_SMETER_REPORT, params, /* paramsLen */ 1);
-            lastSMeterReport = millis();
           }
         }
+
+        // It doesn't matter if we successfully got the S-meter reading, we only want to check at most once every SMETER_REPORT_INTERVAL_MS
+        lastSMeterReport = millis();
       }
+
 
       size_t bytesRead = 0;
       static uint16_t buffer16[I2S_READ_LEN];
