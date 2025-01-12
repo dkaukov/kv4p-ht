@@ -350,7 +350,6 @@ void loop() {
               matchedDelimiterTokensRx = 0;
             }
         } else {
-           Serial.println("."); 
            switch (inByte) {
             case COMMAND_STOP: 
               matchedDelimiterTokensRx = 0;
