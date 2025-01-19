@@ -132,7 +132,7 @@ public class RadioAudioService extends Service {
     // For transmitting audio to ESP32 / radio
     public static final int AUDIO_SAMPLE_RATE = 22050;
     public static final int channelConfig = AudioFormat.CHANNEL_IN_MONO;
-    public static final  int audioFormat = AudioFormat.ENCODING_PCM_8BIT;
+    public static final  int audioFormat = AudioFormat.ENCODING_PCM_16BIT;
     public static final  int minBufferSize = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, channelConfig, audioFormat) * 4;
     private UsbManager usbManager;
     private UsbDevice esp32Device;
@@ -140,6 +140,7 @@ public class RadioAudioService extends Service {
     private SerialInputOutputManager usbIoManager;
     private static final int TX_AUDIO_CHUNK_SIZE = 512; // Tx audio bytes to send to ESP32 in a single USB write
     private Map<String, Integer> mTones = new HashMap<>();
+    private static final int MS_FOR_FINAL_TX_AUDIO_BEFORE_PTT_UP = 400;
 
     // For receiving audio from ESP32 / radio
     private AudioTrack audioTrack;
@@ -751,10 +752,19 @@ public class RadioAudioService extends Service {
             return;
         }
         setMode(MODE_RX);
-        sendCommandToESP32(ESP32Command.PTT_UP);
-        audioTrack.flush();
-        restartAudioPrebuffer();
-        callbacks.txEnded();
+
+        // Hold off on telling the ESP32 firmware to PTT_UP, because we want the last bit of
+        // tx audio to be transmitted first (it's stuck in buffers).
+        final Handler handler = new Handler(Looper.getMainLooper());
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                sendCommandToESP32(ESP32Command.PTT_UP);
+                audioTrack.flush();
+                restartAudioPrebuffer();
+                callbacks.txEnded();
+            }
+        }, MS_FOR_FINAL_TX_AUDIO_BEFORE_PTT_UP);
     }
 
     public void reconnectViaUSB() {
@@ -1151,6 +1161,18 @@ public class RadioAudioService extends Service {
         return serialPort;
     }
 
+    public static byte[] convert8BitTo16Bit(byte[] pcm8) {
+        byte[] pcm16 = new byte[pcm8.length * 2];  // 2 bytes per 16-bit sample
+        for (int i = 0; i < pcm8.length; i++) {
+            int unsignedSample = pcm8[i] & 0xFF;  // Convert to unsigned
+            short sample16 = (short)((unsignedSample) << 8);  // Scale and shift
+            // Store as little-endian (least significant byte first)
+            pcm16[i * 2] = (byte)(sample16 & 0xFF);          // LSB
+            pcm16[i * 2 + 1] = (byte)((sample16 >> 8) & 0xFF); // MSB
+        }
+        return pcm16;
+    }
+
     private void handleESP32Data(byte[] data) {
             // Log.d("DEBUG", "Got bytes from ESP32: " + Arrays.toString(data));
          /* try {
@@ -1203,7 +1225,8 @@ public class RadioAudioService extends Service {
                 synchronized (audioTrack) {
                     if (afskDemodulator != null) { // Avoid race condition at app start.
                         // Play the audio.
-                        audioTrack.write(data, 0, data.length);
+                        byte[] pcm16 = convert8BitTo16Bit(data);
+                        audioTrack.write(pcm16, 0, pcm16.length);
 
                         // Add the audio samples to the AFSK demodulator.
                         float[] audioAsFloats = convertPCM8ToFloatArray(data);
@@ -1227,7 +1250,8 @@ public class RadioAudioService extends Service {
                                 audioTrack.play();
                             }
                             synchronized (audioTrack) {
-                                audioTrack.write(rxBytesPrebuffer, 0, PRE_BUFFER_SIZE);
+                                byte[] pcm16 = convert8BitTo16Bit(rxBytesPrebuffer);
+                                audioTrack.write(pcm16, 0, pcm16.length);
                             }
                         }
 
