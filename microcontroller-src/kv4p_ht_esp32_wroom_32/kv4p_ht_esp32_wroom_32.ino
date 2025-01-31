@@ -168,7 +168,7 @@ void iir_lowpass_reset();
 void sendCmdToAndroid(byte cmdByte, const byte *params, size_t paramsLen);
 
 int debug_log_printf(uint8_t cmd, const char* format, ...) {
-  static char loc_buf[64];
+  static char loc_buf[256];
   char* temp = loc_buf;
   int len;
   va_list arg;
@@ -604,10 +604,12 @@ void loop() {
             byte params[1] = {(uint8_t)rssiInt};
             sendCmdToAndroid(COMMAND_SMETER_REPORT, params, /* paramsLen */ 1);
           }
+          _LOGD("%s, rssiInt=%d", rssiResponse.c_str(), rssiInt);
         }
 
         // It doesn't matter if we successfully got the S-meter reading, we only want to check at most once every SMETER_REPORT_INTERVAL_MS
         lastSMeterReport = millis();
+      
       }
 
 
@@ -815,5 +817,5 @@ void processTxAudio(uint8_t tempBuffer[], int bytesRead) {
 }
 
 void reportPhysPttState() {
-  sendCmdToAndroid(isPhysPttDown ? COMMAND_PHYS_PTT_DOWN : COMMAND_PHYS_PTT_UP, 0, NULL);
+  sendCmdToAndroid(isPhysPttDown ? COMMAND_PHYS_PTT_DOWN : COMMAND_PHYS_PTT_UP, NULL, 0);
 }

@@ -936,8 +936,8 @@ public class RadioAudioService extends Service {
             }
         });
         usbIoManager.setWriteBufferSize(90000); // Must be large enough that ESP32 can take its time accepting our bytes without overrun.
-        usbIoManager.setReadBufferSize(1024/4); // Must not be 0 (infinite) or it may block on read() until a write() occurs.
-        usbIoManager.setReadBufferCount(16*4);
+        usbIoManager.setReadBufferSize(1024); // Must not be 0 (infinite) or it may block on read() until a write() occurs.
+        usbIoManager.setReadBufferCount(16*2);
         usbIoManager.start();
         checkedFirmwareVersion = false;
 
