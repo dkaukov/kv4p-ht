@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "globals.h"
 #include "debug.h"
 #include "led.h"
+#include "network.h"
 
 const byte FIRMWARE_VER[8]   = {'0', '0', '0', '0', '0', '0', '1', '2'};  // Should be 8 characters representing a zero-padded version, like 00000001.
 const byte VERSION_PREFIX[7] = {'V', 'E', 'R', 'S', 'I', 'O', 'N'};       // Must match RadioAudioService.VERSION_PREFIX in Android app.
@@ -153,6 +154,7 @@ void setup() {
   setMode(MODE_STOPPED);
   ledSetup();
   sendCmdToAndroid(COMMAND_HELLO, NULL, 0);
+  networkSetup();
   _LOGI("Setup is finished");
 }
 
@@ -239,6 +241,7 @@ int16_t remove_dc(int16_t x) {
 void loop() {
   debugLoop();
   ledLoop();
+  networkLoop();
   try {
     // Report any physical PTT button presses or releases back to Android app (note that
     // we don't start tx here, Android app decides what to do, since the user could be in

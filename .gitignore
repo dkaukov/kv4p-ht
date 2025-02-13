@@ -7,3 +7,4 @@ backups/
 *.lck
 *.swp
 .idea
+secrets.h
