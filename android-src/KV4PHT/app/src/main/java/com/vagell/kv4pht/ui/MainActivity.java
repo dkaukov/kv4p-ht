@@ -524,6 +524,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void run() {
                         final AppSetting moduleTypeSetting = viewModel.appDb.appSettingDao().getByName("moduleType");
+                        final AppSetting max70cmTxFreqSetting = viewModel.appDb.appSettingDao().getByName("max70cmTxFreq");
 
                         runOnUiThread(new Runnable() {
                             @Override
@@ -533,6 +534,10 @@ public class MainActivity extends AppCompatActivity {
                                                 ? RadioAudioService.RADIO_MODULE_UHF
                                                 : RadioAudioService.RADIO_MODULE_VHF
                                 );
+                                radioAudioService.setMax70cmTxFreq(
+                                        Optional.ofNullable(max70cmTxFreqSetting).map(setting -> setting.value).map(
+                                            Float::parseFloat).orElse(
+                                            Float.valueOf("450")));
                                 radioAudioService.start();
                             }
                         });
