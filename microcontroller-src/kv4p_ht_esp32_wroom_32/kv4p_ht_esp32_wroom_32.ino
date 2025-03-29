@@ -110,9 +110,15 @@ void setup() {
       COLOR_HW_VER = {16, 16, 16};
       break;
   }
-  // Configure watch dog timer (WDT), which will reset the system if it gets stuck somehow.
-  esp_task_wdt_init(10, true);  // Reboot if locked up for a bit
-  esp_task_wdt_add(NULL);       // Add the current task to WDT watch
+  // Configure watchdog timer (WDT), which will reset the system if it gets stuck.
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 10000,  // 10 seconds timeout
+    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Watch all cores
+    .trigger_panic = false // Set to true if you want a panic instead of a reset
+  };
+  // Initialize and enable task watchdog
+  ESP_ERROR_CHECK(esp_task_wdt_reconfigure(&wdt_config));
+  ESP_ERROR_CHECK(esp_task_wdt_add(NULL)); // Add the current task to WDT watch
   buttonsSetup();
   // Set up radio module defaults
   pinMode(PD_PIN, OUTPUT);

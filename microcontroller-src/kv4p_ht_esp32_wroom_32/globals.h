@@ -31,7 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 // I2S audio sampling stuff
 #define I2S_ADC_UNIT    ADC_UNIT_1
-#define I2S_ADC_CHANNEL ADC1_CHANNEL_6
+#define I2S_ADC_CHANNEL ADC_CHANNEL_6
 
 // Connections to radio module
 #define RXD2_PIN      16

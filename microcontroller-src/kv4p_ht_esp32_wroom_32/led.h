@@ -43,7 +43,7 @@ void neopixelColor(const RGBColor &c, uint8_t bright = 255) {
   uint8_t red = (uint16_t(c.red) * bright + 128) >> 8;
   uint8_t green = (uint16_t(c.green) * bright + 128) >> 8;
   uint8_t blue = (uint16_t(c.blue) * bright + 128) >> 8;
-  neopixelWrite(PIXELS_PIN, red, green, blue);
+  rgbLedWrite(PIXELS_PIN, red, green, blue);
 }
 
 // Calculate a float between min and max, that ramps from min to max in half of breath_every,

@@ -20,8 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <AudioTools.h>
 #include <AudioTools/AudioCodecs/CodecOpus.h>
-#include <driver/dac.h>
 #include <esp_task_wdt.h>
+#include <driver/dac_oneshot.h>
 #include "globals.h"
 #include "protocol.h"
 #include "debug.h"
@@ -77,15 +77,20 @@ Boost gain(16.0);
 DCOffsetRemover dcOffsetRemover(DECAY_TIME, AUDIO_SAMPLE_RATE);
 
 inline void injectADCBias() {
-  dac_output_enable(DAC_CHANNEL_2);  // GPIO26 (DAC1)
-  dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * ADC_BIAS_VOLTAGE);
+  dac_oneshot_handle_t dac_handle;
+  dac_oneshot_config_t dac_config = {
+      .chan_id = DAC_CHAN_1  // GPIO26 (DAC1)
+  };
+  ESP_ERROR_CHECK(dac_oneshot_new_channel(&dac_config, &dac_handle));
+  ESP_ERROR_CHECK(dac_oneshot_output_voltage(dac_handle, (255.0 / 3.3) * ADC_BIAS_VOLTAGE));
+  ESP_ERROR_CHECK(dac_oneshot_del_channel(dac_handle));
 } 
 
 inline void setUpADCAttenuator() {
   if (hardware_version == HW_VER_V2_0C) { // v2.0c has a lower input ADC range
-    adc1_config_channel_atten(I2S_ADC_CHANNEL, ADC_ATTEN_DB_0);
+   // adc1_config_channel_atten(I2S_ADC_CHANNEL, ADC_ATTEN_DB_0);
   } else {
-    adc1_config_channel_atten(I2S_ADC_CHANNEL, ADC_ATTENUATION);
+    //adc1_config_channel_atten(I2S_ADC_CHANNEL, ADC_ATTENUATION);
   }
 }
 
@@ -96,9 +101,11 @@ void initI2SRx() {
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
-  config.use_apll = true;
-  config.auto_clear = false;
-  config.adc_pin = ADC_PIN; 
+  config.use_apll = false;
+  config.adc_calibration_active = true;
+  config.adc_attenuation = ADC_ATTENUATION;
+  config.adc_channels[0] = I2S_ADC_CHANNEL; // GPIO34
+  config.sample_rate = AUDIO_SAMPLE_RATE * 1.22;
   in.begin(config);
   rxEnc.setAudioInfo(rxInfo);
   // configure OPUS additinal parameters

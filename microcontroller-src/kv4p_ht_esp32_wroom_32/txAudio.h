@@ -37,10 +37,9 @@ const uint16_t RUNAWAY_TX_SEC = 200;
 void initI2STx() {  
   auto config = out.defaultConfig(TX_MODE);
   config.copyFrom(txInfo);
-  config.adc_pin = DAC_PIN;
   config.is_blocking_write = true;
-  config.use_apll = true;
-  config.auto_clear = false;
+  config.use_apll = false;
+  config.sample_rate = AUDIO_SAMPLE_RATE;
   out.begin(config);
   // configure OPUS additinal parameters
   txDec.setAudioInfo(txInfo);
@@ -49,7 +48,6 @@ void initI2STx() {
   txDec.begin(decoderConfig);
   // Open output
   txOut.begin(txInfo);
-  i2s_zero_dma_buffer(I2S_NUM_0);
   txStreamConfigured = true;
 }
 
