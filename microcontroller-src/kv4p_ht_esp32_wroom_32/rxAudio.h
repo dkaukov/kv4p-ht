@@ -102,7 +102,7 @@ void initI2SRx() {
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
   config.use_apll = false;
-  config.adc_calibration_active = true;
+  config.adc_calibration_active = false;
   config.adc_attenuation = ADC_ATTENUATION;
   config.adc_channels[0] = I2S_ADC_CHANNEL; // GPIO34
   config.sample_rate = AUDIO_SAMPLE_RATE * 1.22;
