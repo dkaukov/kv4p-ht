@@ -45,7 +45,6 @@ void initI2STx() {
   txDec.setAudioInfo(txInfo);
   auto &decoderConfig = txDec.config();
   decoderConfig.max_buffer_write_size = PROTO_MTU;
-  txDec.begin(decoderConfig);
   // Open output
   txOut.begin(txInfo);
   txStreamConfigured = true;

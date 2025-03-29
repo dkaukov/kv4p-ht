@@ -114,7 +114,6 @@ void initI2SRx() {
   encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_40_MS;
   encoderConfig.vbr = 1;
   encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
-  rxEnc.begin(encoderConfig);
   // effects
   effects.clear();
   effects.addEffect(dcOffsetRemover);
