@@ -278,42 +278,45 @@ public class RadioAudioService extends Service {
         private @NonNull CompletableFuture<Optional<Protocol.FirmwareVersion>> waitFirmwareVersion = CompletableFuture.completedFuture(Optional.empty());
         /**
          * Starts the full handshake process.
-         * @param includeHelloStep If true, wait for a HELLO before sending config; otherwise, skip directly to config.
          */
-        void start(boolean includeHelloStep) {
-            CompletionStage<Void> chain = includeHelloStep
-                ? waitForHello().thenCompose(v -> sendConfig())
-                : sendConfig();
+        void start() {
+            startFor(waitForHello()
+                .thenCompose(this::sendConfigStep));
+        }
+
+        private void startFor(CompletionStage<Void> chain) {
             chain
-                .thenCompose(v -> waitForFirmwareVersion())
+                .thenCompose(this::waitForFirmwareVersion)
                 .thenCompose(this::checkFirmwareVersionAndRadioStatus)
-                .thenAccept(res -> {
-                    switch (res) {
-                        case INVALID:
-                            Log.e(TAG, "Cannot parse FirmwareVersion packet.");
-                            callbacks.missingFirmware();
-                            setMode(RadioMode.BAD_FIRMWARE);
-                            return;
-                        case TOO_OLD:
-                            Log.w(TAG, "Firmware version too old, cannot proceed.");
-                            setMode(RadioMode.BAD_FIRMWARE);
-                            return;
-                        case RADIO_MODULE_NOT_FOUND:
-                            Log.e(TAG, "Radio module not found, cannot proceed.");
-                            setMode(RadioMode.BAD_FIRMWARE);
-                            callbacks.radioModuleNotFound();
-                            return;
-                        case OK:
-                            Log.i(TAG, "Firmware version OK, proceeding with radio communication.");
-                            initAfterESP32Connected();
-                    }
-                })
+                .thenAccept(this::handleResult)
                 .exceptionally(ex -> {
                     Log.e(TAG, "Handshake chain failed: " + ex.getMessage());
                     setMode(RadioMode.BAD_FIRMWARE);
                     callbacks.missingFirmware();
                     return null;
                 });
+        }
+
+        private void handleResult(HandshakeResult res) {
+            switch (res) {
+                case INVALID:
+                    Log.e(TAG, "Cannot parse FirmwareVersion packet.");
+                    callbacks.missingFirmware();
+                    setMode(RadioMode.BAD_FIRMWARE);
+                    return;
+                case TOO_OLD:
+                    Log.w(TAG, "Firmware version too old, cannot proceed.");
+                    setMode(RadioMode.BAD_FIRMWARE);
+                    return;
+                case RADIO_MODULE_NOT_FOUND:
+                    Log.e(TAG, "Radio module not found, cannot proceed.");
+                    setMode(RadioMode.BAD_FIRMWARE);
+                    callbacks.radioModuleNotFound();
+                    return;
+                case OK:
+                    Log.i(TAG, "Firmware version OK, proceeding with radio communication.");
+                    initAfterESP32Connected();
+            }
         }
         /**
          * Called when a HELLO command is received from the ESP32.
@@ -324,7 +327,7 @@ public class RadioAudioService extends Service {
             if (!waitForHello.isDone()) {
                 waitForHello.complete(null);
             } else {
-                start(false); // ESP32 rebooted mid-session, restart from config step
+                startFor(sendConfigStep(null)); // ESP32 rebooted mid-session, restart from config step
             }
         }
         /**
@@ -357,7 +360,7 @@ public class RadioAudioService extends Service {
          * Stops any previous communication, notifies callbacks, and sends power config.
          * @return A future that completes once the config is sent.
          */
-        private CompletableFuture<Void> sendConfig() {
+        private CompletableFuture<Void> sendConfigStep(Void ignored) {
             return CompletableFuture.runAsync(() -> {
                 if (audioTrack != null) audioTrack.stop();
                 callbacks.radioModuleHandshake();
@@ -371,7 +374,7 @@ public class RadioAudioService extends Service {
          *
          * @return A future that completes when version is received or times out.
          */
-        private CompletableFuture<Optional<Protocol.FirmwareVersion>> waitForFirmwareVersion() {
+        private CompletableFuture<Optional<Protocol.FirmwareVersion>> waitForFirmwareVersion(Void ignored) {
             waitFirmwareVersion = new CompletableFuture<>();
             protocolScheduler.schedule(() -> {
                 if (!waitFirmwareVersion.isDone()) {
@@ -387,7 +390,7 @@ public class RadioAudioService extends Service {
          * @return A future that completes when initialization is done.
          * @noinspection OptionalUsedAsFieldOrParameterType
          */
-        private CompletionStage<HandshakeResult> checkFirmwareVersionAndRadioStatus(Optional<Protocol.FirmwareVersion> firmwareVersion) {
+        private CompletableFuture<HandshakeResult> checkFirmwareVersionAndRadioStatus(Optional<Protocol.FirmwareVersion> firmwareVersion) {
             return CompletableFuture.supplyAsync(() -> {
                 if (!firmwareVersion.isPresent()) {
                     return HandshakeResult.INVALID;
@@ -843,7 +846,7 @@ public class RadioAudioService extends Service {
         usbIoManager.start();
         hostToEsp32 = new Protocol.Sender(usbIoManager);
         Log.i(TAG, "Connected to ESP32.");
-        protocolHandshake.start(true);
+        protocolHandshake.start();
     }
 
 
