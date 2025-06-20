@@ -209,9 +209,6 @@ public class RadioAudioService extends Service {
     private String radioType = RADIO_MODULE_VHF;
     private int activeMemoryId = -1;
     private int consecutiveSilenceBytes = 0;
-    private boolean radioModuleNotFound = false;
-    private boolean checkedFirmwareVersion = false;
-    private boolean gotHello = false;
     private MicGainBoost micGainBoost = MicGainBoost.NONE;
     @Setter
     private String bandwidth = "Wide";
@@ -221,8 +218,8 @@ public class RadioAudioService extends Service {
     private static final RadioAudioServiceCallbacks NO_OP_CALLBACKS = new RadioAudioServiceCallbacks() {};
     @Setter
     private @NonNull RadioAudioServiceCallbacks callbacks = NO_OP_CALLBACKS;
-    private final Handler timeOutHandler = new Handler(Looper.getMainLooper());
     private final ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(2, 10, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+    private final ProtocolHandshake protocolHandshake = new ProtocolHandshake();
     private LiveData<List<ChannelMemory>> channelMemoriesLiveData = null;
 
     // === Scan Timing ===
@@ -263,6 +260,153 @@ public class RadioAudioService extends Service {
         default void forcedPttStart() {}
         default void forcedPttEnd() {}
         default void setRadioType(String ratioType) {}
+    }
+
+
+    private enum HandshakeResult {INVALID, TOO_OLD, OK, RADIO_MODULE_NOT_FOUND}
+
+    /**
+     * Handles the asynchronous, multistep handshake process with the ESP32 over USB serial.
+     * Steps include waiting for a HELLO command, sending configuration, and verifying firmware version.
+     * This class supports clean chaining with timeouts, and can be restarted if the ESP32 reboots.
+     */
+    private class ProtocolHandshake {
+        private final ScheduledExecutorService protocolScheduler = Executors.newSingleThreadScheduledExecutor();
+        /** Future completed when HELLO is received or timeout occurs. */
+        private @NonNull CompletableFuture<Void> waitForHello = CompletableFuture.completedFuture(null);
+        /** Future completed when firmware version is received or timeout occurs. */
+        private @NonNull CompletableFuture<Optional<Protocol.FirmwareVersion>> waitFirmwareVersion = CompletableFuture.completedFuture(Optional.empty());
+        /**
+         * Starts the full handshake process.
+         * @param includeHelloStep If true, wait for a HELLO before sending config; otherwise, skip directly to config.
+         */
+        void start(boolean includeHelloStep) {
+            CompletionStage<Void> chain = includeHelloStep
+                ? waitForHello().thenCompose(v -> sendConfig())
+                : sendConfig();
+            chain
+                .thenCompose(v -> waitForFirmwareVersion())
+                .thenCompose(this::checkFirmwareVersionAndRadioStatus)
+                .thenAccept(res -> {
+                    switch (res) {
+                        case INVALID:
+                            Log.e(TAG, "Cannot parse FirmwareVersion packet.");
+                            callbacks.missingFirmware();
+                            setMode(RadioMode.BAD_FIRMWARE);
+                            return;
+                        case TOO_OLD:
+                            Log.w(TAG, "Firmware version too old, cannot proceed.");
+                            setMode(RadioMode.BAD_FIRMWARE);
+                            return;
+                        case RADIO_MODULE_NOT_FOUND:
+                            Log.e(TAG, "Radio module not found, cannot proceed.");
+                            setMode(RadioMode.BAD_FIRMWARE);
+                            callbacks.radioModuleNotFound();
+                            return;
+                        case OK:
+                            Log.i(TAG, "Firmware version OK, proceeding with radio communication.");
+                            initAfterESP32Connected();
+                    }
+                })
+                .exceptionally(ex -> {
+                    Log.e(TAG, "Handshake chain failed: " + ex.getMessage());
+                    setMode(RadioMode.BAD_FIRMWARE);
+                    callbacks.missingFirmware();
+                    return null;
+                });
+        }
+        /**
+         * Called when a HELLO command is received from the ESP32.
+         * If a handshake is already waiting for HELLO, complete it.
+         * If no handshake is active (e.g., due to unexpected reboot), restart the handshake from config step.
+         */
+        void onHelloReceived() {
+            if (!waitForHello.isDone()) {
+                waitForHello.complete(null);
+            } else {
+                start(false); // ESP32 rebooted mid-session, restart from config step
+            }
+        }
+        /**
+         * Notifies the handshake logic that a firmware version was received from the ESP32.
+         * Completes the waiting future if it's active.
+         * @param version The firmware version parsed from the received data.
+         * @noinspection OptionalUsedAsFieldOrParameterType
+         */
+        void onVersionReceived(Optional<Protocol.FirmwareVersion> version) {
+            if (!waitFirmwareVersion.isDone()) {
+                waitFirmwareVersion.complete(version);
+            }
+        }
+        /**
+         * Waits for the HELLO command from the ESP32 with a timeout.
+         *
+         * @return A future that completes when HELLO is received or times out.
+         */
+        private CompletableFuture<Void> waitForHello() {
+            waitForHello = new CompletableFuture<>();
+            protocolScheduler.schedule(() -> {
+                if (!waitForHello.isDone()) {
+                    waitForHello.completeExceptionally(new TimeoutException("Timeout waiting for HELLO"));
+                }
+            }, 1000, TimeUnit.MILLISECONDS);
+            return waitForHello;
+        }
+        /**
+         * Sends configuration to the ESP32.
+         * Stops any previous communication, notifies callbacks, and sends power config.
+         * @return A future that completes once the config is sent.
+         */
+        private CompletableFuture<Void> sendConfig() {
+            return CompletableFuture.runAsync(() -> {
+                if (audioTrack != null) audioTrack.stop();
+                callbacks.radioModuleHandshake();
+                setMode(RadioMode.STARTUP);
+                hostToEsp32.stop();
+                hostToEsp32.config(Config.builder().isHigh(isHighPower).build());
+            });
+        }
+        /**
+         * Waits for a firmware version response from the ESP32 with a timeout.
+         *
+         * @return A future that completes when version is received or times out.
+         */
+        private CompletableFuture<Optional<Protocol.FirmwareVersion>> waitForFirmwareVersion() {
+            waitFirmwareVersion = new CompletableFuture<>();
+            protocolScheduler.schedule(() -> {
+                if (!waitFirmwareVersion.isDone()) {
+                    waitFirmwareVersion.completeExceptionally(new TimeoutException("Timeout waiting for firmware version"));
+                }
+            }, 60000, TimeUnit.MILLISECONDS);
+            return waitFirmwareVersion;
+        }
+        /**
+         * Starts communication with the ESP32 after verifying the firmware version.
+         * Updates mode and notifies the app if the firmware is outdated or the radio module is missing.
+         * @param firmwareVersion The firmware version received from the ESP32.
+         * @return A future that completes when initialization is done.
+         * @noinspection OptionalUsedAsFieldOrParameterType
+         */
+        private CompletionStage<HandshakeResult> checkFirmwareVersionAndRadioStatus(Optional<Protocol.FirmwareVersion> firmwareVersion) {
+            return CompletableFuture.supplyAsync(() -> {
+                if (!firmwareVersion.isPresent()) {
+                    return HandshakeResult.INVALID;
+                }
+                final Protocol.FirmwareVersion ver = firmwareVersion.get();
+                if (ver.getVer() < FirmwareUtils.PACKAGED_FIRMWARE_VER) {
+                    callbacks.outdatedFirmware(ver.getVer());
+                    return HandshakeResult.TOO_OLD;
+                }
+                setRadioType(RfModuleType.RF_SA818_VHF.equals(ver.getModuleType()) ? RADIO_MODULE_VHF : RADIO_MODULE_UHF);
+                hasHighLowPowerSwitch = ver.isHasHl();
+                if (ver.getRadioModuleStatus() == RadioStatus.RADIO_STATUS_NOT_FOUND) {
+                    return HandshakeResult.RADIO_MODULE_NOT_FOUND;
+                } else {
+                    hostToEsp32.setFlowControlWindow(ver.getWindowSize());
+                    return HandshakeResult.OK;
+                }
+            });
+        }
     }
 
     @Override
@@ -308,6 +452,8 @@ public class RadioAudioService extends Service {
             if (enabled) {
                 beaconFuture = aprsPositionExecutor.scheduleWithFixedDelay(this::sendPositionBeacon,
                     0, APRS_BEACON_MINS, TimeUnit.MINUTES);
+                // Tell callback we started (e.g. so it can show a SnackBar letting user know)
+                callbacks.aprsBeaconing(true, aprsPositionAccuracy);
             } else if (beaconFuture != null) {
                 beaconFuture.cancel(true);
                 beaconFuture = null;
@@ -696,18 +842,10 @@ public class RadioAudioService extends Service {
         usbIoManager.setReadBufferCount(16 * 2);
         usbIoManager.start();
         hostToEsp32 = new Protocol.Sender(usbIoManager);
-        checkedFirmwareVersion = false;
-        gotHello = false;
         Log.i(TAG, "Connected to ESP32.");
-        timeOutHandler.removeCallbacksAndMessages(null);
-        timeOutHandler.postDelayed(() -> {
-            if (!gotHello) {
-                Log.e(TAG, "Error: No HELLO received from module.");
-                callbacks.missingFirmware();
-                setMode(RadioMode.BAD_FIRMWARE);
-            }
-        }, 1000);
+        protocolHandshake.start(true);
     }
+
 
     /**
      * @param radioType should be RADIO_TYPE_UHF or RADIO_TYPE_VHF
@@ -730,27 +868,6 @@ public class RadioAudioService extends Service {
                 setMaxRadioFreq(UHF_MAX_FREQ);
             }
         }
-    }
-
-    private void checkFirmwareVersion() {
-        checkedFirmwareVersion = true; // To prevent multiple USB connect events from spamming the ESP32 with requests (which can cause logic errors).
-        // Verify that the firmware of the ESP32 app is supported.
-        setMode(RadioMode.STARTUP);
-        hostToEsp32.stop();
-        hostToEsp32.config(Config.builder()
-            .isHigh(isHighPower)
-            .build());
-        // The version is actually evaluated in handleESP32Data().
-        // If we don't hear back from the ESP32, it means the firmware is either not
-        // installed or it's somehow corrupt.
-        timeOutHandler.removeCallbacksAndMessages(null);
-        timeOutHandler.postDelayed(() -> {
-            if (getMode() == RadioMode.STARTUP && !checkedFirmwareVersion) {
-                Log.e(TAG, "Error: Did not hear back from ESP32 after requesting its firmware version. Offering to flash.");
-                callbacks.missingFirmware();
-                setMode(RadioMode.BAD_FIRMWARE);
-            }
-        }, 60000);
     }
 
     private void initAfterESP32Connected() {
@@ -910,7 +1027,7 @@ public class RadioAudioService extends Service {
                 break;
 
             case COMMAND_HELLO:
-                handleHello();
+                protocolHandshake.onHelloReceived();
                 break;
 
             case COMMAND_RX_AUDIO:
@@ -918,7 +1035,7 @@ public class RadioAudioService extends Service {
                 break;
 
             case COMMAND_VERSION:
-                handleVersion(param, len);
+                protocolHandshake.onVersionReceived(Protocol.FirmwareVersion.from(param, len));
                 break;
 
             case COMMAND_WINDOW_UPDATE:
@@ -942,54 +1059,6 @@ public class RadioAudioService extends Service {
         if (getMode() == RadioMode.RX && txAllowed) { // Note that people can't hit PTT in the middle of a scan.
             startPtt();
             callbacks.forcedPttStart();
-        }
-    }
-
-    /**
-     * Handles the HELLO command received from the ESP32.
-     * It sets a flag indicating that the HELLO message was received,
-     * stops the audio track if it is currently playing, and notifies
-     * the callbacks that the radio module handshake has occurred.
-     * It also initiates the firmware version check.
-     */
-    private void handleHello() {
-        gotHello = true;
-        if (audioTrack != null) {
-            audioTrack.stop();
-        }
-        callbacks.radioModuleHandshake();
-        checkFirmwareVersion();
-    }
-
-    /**
-     * Handles the version command received from the ESP32.
-     * It checks if the firmware version is compatible with the app's requirements.
-     * If the version is outdated, it notifies the user through callbacks.
-     * It also sets the radio module type based on the firmware information.
-     *
-     * @param param The byte array containing the version information.
-     * @param len   The length of the version information in bytes.
-     */
-    private void handleVersion(final byte[] param, final Integer len) {
-        if (getMode() == RadioMode.STARTUP) {
-            Protocol.FirmwareVersion.from(param, len).ifPresent(ver -> {
-                if (ver.getVer() < FirmwareUtils.PACKAGED_FIRMWARE_VER) {
-                    Log.e(TAG, String.format("Error: ESP32 app firmware %s is older than latest firmware %s",
-                        ver.getVer(), FirmwareUtils.PACKAGED_FIRMWARE_VER));
-                    callbacks.outdatedFirmware(ver.getVer());
-                    return;
-                }
-                Log.i(TAG, String.format("Recent ESP32 app firmware version detected (%s).", ver));
-                radioModuleNotFound = ver.getRadioModuleStatus() != RadioStatus.RADIO_STATUS_FOUND;
-                setRadioType(RfModuleType.RF_SA818_VHF.equals(ver.getModuleType()) ? RADIO_MODULE_VHF : RADIO_MODULE_UHF);
-                this.hasHighLowPowerSwitch = ver.isHasHl();
-                if (radioModuleNotFound) {
-                    callbacks.radioModuleNotFound();
-                } else {
-                    hostToEsp32.setFlowControlWindow(ver.getWindowSize());
-                    initAfterESP32Connected();
-                }
-            });
         }
     }
 
