@@ -111,6 +111,7 @@ class ProtocolHandshake {
      */
     public void onHelloReceived() {
         if (!waitForHello.isDone()) {
+            Log.d(TAG, "HELLO received from ESP32.");
             waitForHello.complete(null);
         } else {
             Log.i(TAG, "ESP32 rebooted, restarting handshake from config step.");
@@ -127,6 +128,7 @@ class ProtocolHandshake {
      */
     public void onVersionReceived(Optional<Protocol.FirmwareVersion> version) {
         if (!waitFirmwareVersion.isDone()) {
+            Log.d(TAG, "Firmware version received from ESP32: " + version);
             waitFirmwareVersion.complete(version);
         }
     }
@@ -157,8 +159,9 @@ class ProtocolHandshake {
             radioAudioService.getCallbacks().radioModuleHandshake();
             radioAudioService.setMode(RadioMode.STARTUP);
             radioAudioService.getHostToEsp32().stop();
-            radioAudioService.getHostToEsp32().config(Protocol.Config.builder().isHigh(radioAudioService.isHighPower())
-                .build());
+            Protocol.Config cfg = Protocol.Config.builder().isHigh(radioAudioService.isHighPower()).build();
+            Log.d(TAG, "Sending configuration to ESP32: " + cfg);
+            radioAudioService.getHostToEsp32().config(cfg);
         });
     }
 
@@ -196,8 +199,8 @@ class ProtocolHandshake {
                 return HandshakeResult.TOO_OLD;
             }
             radioAudioService.setRadioType(Protocol.RfModuleType.RF_SA818_VHF.equals(ver.getModuleType())
-                ? RadioAudioService.RADIO_MODULE_VHF
-                : RadioAudioService.RADIO_MODULE_UHF);
+                ? RadioAudioService.RadioModuleType.VHF
+                : RadioAudioService.RadioModuleType.UHF);
             radioAudioService.setHasHighLowPowerSwitch(ver.isHasHl());
             if (Protocol.RadioStatus.RADIO_STATUS_NOT_FOUND.equals(ver.getRadioModuleStatus())) {
                 return HandshakeResult.RADIO_MODULE_NOT_FOUND;

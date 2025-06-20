@@ -216,7 +216,7 @@ public class MainActivity extends AppCompatActivity {
                 Intent intent = new Intent("com.vagell.kv4pht.EDIT_MEMORY_ACTION");
                 intent.putExtra("requestCode", REQUEST_EDIT_MEMORY);
                 intent.putExtra("memoryId", memory.memoryId);
-                intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType().equals(RadioAudioService.RADIO_MODULE_VHF)));
+                intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType().equals(RadioAudioService.RadioModuleType.VHF)));
                 startActivityForResult(intent, REQUEST_EDIT_MEMORY);
             }
         });
@@ -314,10 +314,10 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 @Override
-                public void setRadioType(String ratioType) {
-                    if (ratioType.equals(RadioAudioService.RADIO_MODULE_VHF)) {
+                public void setRadioType(RadioAudioService.RadioModuleType ratioType) {
+                    if (ratioType.equals(RadioAudioService.RadioModuleType.VHF)) {
                         showBand(BandType.BAND_VHF);
-                    } else if (ratioType.equals(RadioAudioService.RADIO_MODULE_UHF)) {
+                    } else if (ratioType.equals(RadioAudioService.RadioModuleType.UHF)) {
                         showBand(BandType.BAND_UHF);
                     } else {
                         showBand(BandType.BAND_UNKNOWN);
@@ -1723,7 +1723,7 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("requestCode", REQUEST_ADD_MEMORY);
         intent.putExtra("activeFrequencyStr", activeFrequencyStr);
         intent.putExtra("selectedMemoryGroup", selectedMemoryGroup);
-        intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType().equals(RadioAudioService.RADIO_MODULE_VHF)));
+        intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType().equals(RadioAudioService.RadioModuleType.VHF)));
 
         startActivityForResult(intent, REQUEST_ADD_MEMORY);
     }

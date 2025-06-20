@@ -152,8 +152,7 @@ public class RadioAudioService extends Service {
     @Setter
     private static float maxHamFreq = max2mTxFreq;
 
-    public static final String RADIO_MODULE_VHF = "v";
-    public static final String RADIO_MODULE_UHF = "u";
+    public enum RadioModuleType {UNKNOWN, VHF, UHF}
 
     // === Audio / Opus Handling ===
     private final float[] pcmFloat = new float[OPUS_FRAME_SIZE];
@@ -203,7 +202,7 @@ public class RadioAudioService extends Service {
     @Getter
     private String activeFrequencyStr = null;
     @Getter
-    private String radioType = RADIO_MODULE_VHF;
+    private RadioModuleType radioType = RadioModuleType.UNKNOWN;
     private int activeMemoryId = -1;
     private int consecutiveSilenceBytes = 0;
     private MicGainBoost micGainBoost = MicGainBoost.NONE;
@@ -258,7 +257,7 @@ public class RadioAudioService extends Service {
         default void forceTunedToFreq(String newFreqStr) {}
         default void forcedPttStart() {}
         default void forcedPttEnd() {}
-        default void setRadioType(String ratioType) {}
+        default void setRadioType(RadioModuleType ratioType) {}
     }
 
     @Override
@@ -596,6 +595,7 @@ public class RadioAudioService extends Service {
     private void findESP32Device() {
         Log.i(TAG, "findESP32Device()");
         setMode(RadioMode.STARTUP);
+        setRadioType(RadioModuleType.UNKNOWN);
         Optional<UsbDevice> device = usbManager.getDeviceList().values().stream()
             .filter(this::isESP32Device)
             .findFirst();
@@ -693,23 +693,27 @@ public class RadioAudioService extends Service {
     /**
      * @param radioType should be RADIO_TYPE_UHF or RADIO_TYPE_VHF
      */
-    public void setRadioType(String radioType) {
-        Log.i(TAG, "setRadioType: " + radioType);
+    public void setRadioType(RadioModuleType radioType) {
         callbacks.setRadioType(radioType);
         if (!this.radioType.equals(radioType)) {
             this.radioType = radioType;
             // Ensure frequencies we're using match the radioType
-            if (radioType.equals(RADIO_MODULE_VHF)) {
+            if (radioType.equals(RadioModuleType.VHF)) {
                 setMinRadioFreq(VHF_MIN_FREQ);
                 setMinHamFreq(min2mTxFreq);
                 setMaxHamFreq(max2mTxFreq);
                 setMaxRadioFreq(VHF_MAX_FREQ);
-            } else if (radioType.equals(RADIO_MODULE_UHF)) {
+            } else if (radioType.equals(RadioModuleType.UHF)) {
                 setMinRadioFreq(UHF_MIN_FREQ);
                 setMinHamFreq(min70cmTxFreq);
                 setMaxHamFreq(max70cmTxFreq);
                 setMaxRadioFreq(UHF_MAX_FREQ);
             }
+            Log.d(TAG, "Radio type set to: " + radioType);
+            Log.d(TAG, "Min radio freq: " + minRadioFreq);
+            Log.d(TAG, "Max radio freq: " + maxRadioFreq);
+            Log.d(TAG, "Min ham freq: " + minHamFreq);
+            Log.d(TAG, "Max ham freq: " + maxHamFreq);
         }
     }
 
