@@ -87,6 +87,7 @@ import com.vagell.kv4pht.data.AppSetting;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.databinding.ActivityMainBinding;
 import com.vagell.kv4pht.radio.RadioAudioService;
+import com.vagell.kv4pht.radio.RadioMode;
 
 import java.util.Arrays;
 import java.util.List;
@@ -184,7 +185,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onMemoryClick(ChannelMemory memory) {
                 // Actually tune to it.
-                if (radioAudioService != null && radioAudioService.getMode() == RadioAudioService.MODE_SCAN) {
+                if (radioAudioService != null && radioAudioService.getMode() == RadioMode.SCAN) {
                     radioAudioService.setScanning(false);
                     setScanningUi(false);
                 }
@@ -307,7 +308,7 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void radioConnected() {
-                    hideSnackbar();
+                    hideSnackBar();
                     applySettings();
                     findViewById(R.id.pttButton).setClickable(true);
                 }
@@ -324,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 @Override
-                public void hideSnackbar() {
+                public void hideSnackBar() {
                     if (usbSnackbar != null) {
                         usbSnackbar.dismiss();
                         usbSnackbar = null;
@@ -427,8 +428,8 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 @Override
-                public void chatError(String snackbarMsg) {
-                    Snackbar snackbar = Snackbar.make(context, findViewById(R.id.mainTopLevelLayout), snackbarMsg, Snackbar.LENGTH_LONG)
+                public void chatError(String text) {
+                    Snackbar snackbar = Snackbar.make(context, findViewById(R.id.mainTopLevelLayout), text, Snackbar.LENGTH_LONG)
                             .setBackgroundTint(Color.rgb(140, 20, 0))
                             .setTextColor(Color.WHITE)
                             .setAnchorView(findViewById(R.id.textChatInput));
@@ -571,7 +572,7 @@ public class MainActivity extends AppCompatActivity {
         // you can define different fields and values. Once we know the type, we set aprsMessage.type.
 
         APRSMessage aprsMessage = new APRSMessage();
-        InformationField infoField = aprsPacket.getAprsInformation();
+        InformationField infoField = aprsPacket.getPayload();
         WeatherField weatherField = (WeatherField) infoField.getAprsData(APRSTypes.T_WX);
         PositionField positionField = (PositionField) infoField.getAprsData(APRSTypes.T_POSITION);
         ObjectField objectField = (ObjectField) infoField.getAprsData(APRSTypes.T_OBJECT);
@@ -874,11 +875,11 @@ public class MainActivity extends AppCompatActivity {
         handler.postDelayed(() -> runOnUiThread(() -> {
             ImageView txAudioView = findViewById(R.id.txAudioCircle);
             ViewGroup.MarginLayoutParams layoutParams = (ViewGroup.MarginLayoutParams) txAudioView.getLayoutParams();
-            int mode = radioAudioService != null ? radioAudioService.getMode() : -1;
+            RadioMode mode = radioAudioService != null ? radioAudioService.getMode() : RadioMode.UNKNOWN;
             layoutParams.width = Math.abs(txVolume) < 0.001 ||
-                    mode == RadioAudioService.MODE_RX ? 0 : (int) (MAX_AUDIO_VIZ_SIZE * txVolume) + MIN_TX_AUDIO_VIZ_SIZE;
+                    mode == RadioMode.RX ? 0 : (int) (MAX_AUDIO_VIZ_SIZE * txVolume) + MIN_TX_AUDIO_VIZ_SIZE;
             layoutParams.height = Math.abs(txVolume) < 0.001 ||
-                    mode == RadioAudioService.MODE_RX ? 0 : (int) (MAX_AUDIO_VIZ_SIZE * txVolume) + MIN_TX_AUDIO_VIZ_SIZE;
+                    mode == RadioMode.RX ? 0 : (int) (MAX_AUDIO_VIZ_SIZE * txVolume) + MIN_TX_AUDIO_VIZ_SIZE;
             txAudioView.setLayoutParams(layoutParams);
         }), waitMs); // waitMs gives us the fps we desire, see RECORD_ANIM_FPS constant.
     }
@@ -934,11 +935,11 @@ public class MainActivity extends AppCompatActivity {
         if (radioAudioService != null) {
             if (activeMemoryId > -1) {
                 radioAudioService.setActiveMemoryId(activeMemoryId);
-                radioAudioService.tuneToMemory(activeMemoryId, squelch, radioAudioService.getMode() == RadioAudioService.MODE_RX);
+                radioAudioService.tuneToMemory(activeMemoryId, squelch, radioAudioService.getMode() == RadioMode.RX);
                 tuneToMemoryUi(activeMemoryId);
             } else {
-                radioAudioService.tuneToFreq(activeFrequencyStr, squelch, radioAudioService.getMode() == RadioAudioService.MODE_RX);
-                tuneToFreqUi(activeFrequencyStr, radioAudioService.getMode() == RadioAudioService.MODE_RX);
+                radioAudioService.tuneToFreq(activeFrequencyStr, squelch, radioAudioService.getMode() == RadioMode.RX);
+                tuneToFreqUi(activeFrequencyStr, radioAudioService.getMode() == RadioMode.RX);
             }
         }
     }
@@ -978,8 +979,8 @@ public class MainActivity extends AppCompatActivity {
         boolean lowpass = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_LOWPASS, "true"));
         if (radioAudioService != null && radioAudioService.isRadioConnected()) {
             threadPoolExecutor.execute(() -> {
-                if (radioAudioService.getMode() != RadioAudioService.MODE_STARTUP && radioAudioService.getMode() != RadioAudioService.MODE_SCAN) {
-                    radioAudioService.setMode(RadioAudioService.MODE_RX);
+                if (radioAudioService.getMode() != RadioMode.STARTUP && radioAudioService.getMode() != RadioMode.SCAN) {
+                    radioAudioService.setMode(RadioMode.RX);
                     radioAudioService.setFilters(emphasis, highpass, lowpass);
                 }
             });
@@ -1037,7 +1038,7 @@ public class MainActivity extends AppCompatActivity {
 
                     pttButtonDebounceHandler.removeCallbacksAndMessages(null);
                     if (stickyPTT) {
-                        if (radioAudioService != null && radioAudioService.getMode() == RadioAudioService.MODE_RX) {
+                        if (radioAudioService != null && radioAudioService.getMode() == RadioMode.RX) {
                             ((Vibrator) getSystemService(Context.VIBRATOR_SERVICE)).vibrate(100);
                             if (radioAudioService != null) {
                                 // If the user tries to transmit, stop scanning so we don't
@@ -1047,7 +1048,7 @@ public class MainActivity extends AppCompatActivity {
                                 radioAudioService.startPtt();
                             }
                             startPttUi(false);
-                        } else if (radioAudioService != null && radioAudioService.getMode() == RadioAudioService.MODE_TX) {
+                        } else if (radioAudioService != null && radioAudioService.getMode() == RadioMode.TX) {
                             ((Vibrator) getSystemService(Context.VIBRATOR_SERVICE)).vibrate(100);
                             if (radioAudioService != null) {
                                 radioAudioService.endPtt();
@@ -1105,13 +1106,13 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                if (radioAudioService != null && radioAudioService.getMode() == RadioAudioService.MODE_RX) {
+                if (radioAudioService != null && radioAudioService.getMode() == RadioMode.RX) {
                     ((Vibrator) getSystemService(Context.VIBRATOR_SERVICE)).vibrate(100);
                     if (radioAudioService != null) {
                         radioAudioService.startPtt();
                     }
                     startPttUi(false);
-                } else if (radioAudioService != null && radioAudioService.getMode() == RadioAudioService.MODE_TX) {
+                } else if (radioAudioService != null && radioAudioService.getMode() == RadioMode.TX) {
                     ((Vibrator) getSystemService(Context.VIBRATOR_SERVICE)).vibrate(100);
                     if (radioAudioService != null) {
                         radioAudioService.endPtt();
@@ -1662,9 +1663,9 @@ public class MainActivity extends AppCompatActivity {
     };
 
     public void scanClicked(View view) {
-        setScanningUi((radioAudioService != null) && (radioAudioService.getMode()) != RadioAudioService.MODE_SCAN); // Toggle scanning on/off
+        setScanningUi((radioAudioService != null) && (radioAudioService.getMode()) != RadioMode.SCAN); // Toggle scanning on/off
         if (radioAudioService != null) {
-            radioAudioService.setScanning(radioAudioService.getMode() != RadioAudioService.MODE_SCAN, true);
+            radioAudioService.setScanning(radioAudioService.getMode() != RadioMode.SCAN, true);
         }
     }
 
@@ -1858,7 +1859,7 @@ public class MainActivity extends AppCompatActivity {
         setScanningUi(false);
 
         // Tell the radioAudioService to hold on while we flash.
-        radioAudioService.setMode(RadioAudioService.MODE_FLASHING);
+        radioAudioService.setMode(RadioMode.FLASHING);
 
         // Actually start the firmware activity
         Intent intent = new Intent("com.vagell.kv4pht.FIRMWARE_ACTION");
