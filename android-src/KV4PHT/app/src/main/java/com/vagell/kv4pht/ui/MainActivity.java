@@ -950,10 +950,10 @@ public class MainActivity extends AppCompatActivity {
         String max2m = settings.get(AppSetting.SETTING_MAX_2_M_TX_FREQ);
         String min70 = settings.get(AppSetting.SETTING_MIN_70_CM_TX_FREQ);
         String max70 = settings.get(AppSetting.SETTING_MAX_70_CM_TX_FREQ);
-        if (min2m != null) RadioAudioService.setMin2mTxFreq(Integer.parseInt(min2m));
-        if (max2m != null) RadioAudioService.setMax2mTxFreq(Integer.parseInt(max2m));
-        if (min70 != null) RadioAudioService.setMin70cmTxFreq(Integer.parseInt(min70));
-        if (max70 != null) RadioAudioService.setMax70cmTxFreq(Integer.parseInt(max70));
+        if (min2m != null) radioAudioService.setMin2mTxFreq(Integer.parseInt(min2m));
+        if (max2m != null) radioAudioService.setMax2mTxFreq(Integer.parseInt(max2m));
+        if (min70 != null) radioAudioService.setMin70cmTxFreq(Integer.parseInt(min70));
+        if (max70 != null) radioAudioService.setMax70cmTxFreq(Integer.parseInt(max70));
     }
 
     private void applyBandwidthAndGain(Map<String, String> settings) {
@@ -1128,7 +1128,7 @@ public class MainActivity extends AppCompatActivity {
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
                 if (radioAudioService != null) {
                     radioAudioService.tuneToFreq(activeFrequencyField.getText().toString(), squelch, false);
-                    tuneToFreqUi(RadioAudioService.makeSafeHamFreq(activeFrequencyField.getText().toString()), false); // Fixes any invalid freq user may have entered.
+                    tuneToFreqUi(radioAudioService.makeSafeHamFreq(activeFrequencyField.getText().toString()), false); // Fixes any invalid freq user may have entered.
                 }
 
                 hideKeyboard();

@@ -64,6 +64,7 @@ import com.google.android.material.snackbar.Snackbar;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.radio.RadioAudioService;
+import com.vagell.kv4pht.radio.RadioServiceConnector;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -86,6 +87,8 @@ public class FindRepeatersActivity extends AppCompatActivity {
     private List<RepeaterInfo> nearbyRepeaters = null;
     private String locality = null;
     private MainViewModel viewModel;
+    private RadioServiceConnector serviceConnector;
+    private RadioAudioService radioAudioService;
 
     // Android permission stuff
     private static final int REQUEST_LOCATION_PERMISSION_CODE = 1;
@@ -93,6 +96,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        serviceConnector = new RadioServiceConnector(this);
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
         setContentView(R.layout.activity_find_repeaters);
 
@@ -258,6 +262,9 @@ public class FindRepeatersActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        serviceConnector.bind(rs -> {
+            this.radioAudioService = rs;
+        });
     }
 
     @Override
@@ -273,6 +280,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
         super.onDestroy();
         unregisterReceiver(onDownloadComplete);
         threadPoolExecutor.shutdownNow();
+        serviceConnector.unbind();
     }
 
     /**
@@ -405,7 +413,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
             r.degrees  = tryParseDouble(cols[11]);
 
             // If this repeater is below or above the frequencies this radio is capable of, skip it.
-            if (r.freq < RadioAudioService.minRadioFreq || r.freq > RadioAudioService.maxRadioFreq) {
+            if (r.freq < radioAudioService.getMinRadioFreq() || r.freq > radioAudioService.getMaxRadioFreq()) {
                 continue;
             }
 
@@ -520,7 +528,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
             ChannelMemory memory = new ChannelMemory();
             memory.name = r.call + " • " + r.location;
             memory.group = group;
-            memory.frequency = RadioAudioService.makeSafeHamFreq(String.valueOf(r.freq));
+            memory.frequency = radioAudioService.makeSafeHamFreq(String.valueOf(r.freq));
             if (r.offset < 0) {
                 memory.offset = ChannelMemory.OFFSET_DOWN;
             } else if (r.offset > 0) {

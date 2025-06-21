@@ -137,20 +137,22 @@ public class RadioAudioService extends Service {
 
     // These will be overwritten by user settings
     @Setter
-    private static float min2mTxFreq = 144.0f;
+    private float min2mTxFreq = 144.0f;
     @Setter
-    private static float max2mTxFreq = 148.0f;
+    private float max2mTxFreq = 148.0f;
     @Setter
-    private static float min70cmTxFreq = 420.0f;
+    private float min70cmTxFreq = 420.0f;
     @Setter
-    private static float max70cmTxFreq = 450.0f;
+    private float max70cmTxFreq = 450.0f;
 
-    public static float minRadioFreq = VHF_MIN_FREQ;
-    public static float maxRadioFreq = VHF_MAX_FREQ;
+    @Getter
+    private float minRadioFreq = VHF_MIN_FREQ;
+    @Getter
+    private float maxRadioFreq = VHF_MAX_FREQ;
     @Setter
-    private static float minHamFreq = min2mTxFreq;
+    private float minHamFreq = min2mTxFreq;
     @Setter
-    private static float maxHamFreq = max2mTxFreq;
+    private float maxHamFreq = max2mTxFreq;
 
     public enum RadioModuleType {UNKNOWN, VHF, UHF}
 
@@ -166,7 +168,8 @@ public class RadioAudioService extends Service {
 
     // === USB / Serial ===
     private UsbManager usbManager;
-    private static UsbSerialPort serialPort;
+    @Getter
+    private UsbSerialPort serialPort;
     private SerialInputOutputManager usbIoManager;
     @Getter
     private Protocol.Sender hostToEsp32;
@@ -198,16 +201,16 @@ public class RadioAudioService extends Service {
     @Setter
     private int squelch = 0;
     @Setter
-    private String callsign = null;
+    private @NonNull String callsign = "";
     @Getter
-    private String activeFrequencyStr = null;
+    private @NonNull String activeFrequencyStr = "";
     @Getter
     private RadioModuleType radioType = RadioModuleType.UNKNOWN;
     private int activeMemoryId = -1;
     private int consecutiveSilenceBytes = 0;
     private MicGainBoost micGainBoost = MicGainBoost.NONE;
     @Setter
-    private String bandwidth = "Wide";
+    private @NonNull String bandwidth = "Wide";
 
     // === Android Components ===
     private final IBinder binder = new RadioBinder();
@@ -282,7 +285,7 @@ public class RadioAudioService extends Service {
     public void setMinRadioFreq(float newMinFreq) {
         minRadioFreq = newMinFreq;
         // Detect if we're moving from VHF to UHF, and move active frequency to within band.
-        if (mode != RadioMode.STARTUP && activeFrequencyStr != null && Float.parseFloat(activeFrequencyStr) < minRadioFreq) {
+        if (mode != RadioMode.STARTUP && Float.parseFloat(activeFrequencyStr) < minRadioFreq) {
             tuneToFreq(String.format(java.util.Locale.US, "%.4f", min70cmTxFreq), squelch, true);
             callbacks.forceTunedToFreq(activeFrequencyStr);
         }
@@ -291,7 +294,7 @@ public class RadioAudioService extends Service {
     public void setMaxRadioFreq(float newMaxFreq) {
         maxRadioFreq = newMaxFreq;
         // Detect if we're moving from UHF to VHF, and move active frequency to within band.
-        if (mode != RadioMode.STARTUP && activeFrequencyStr != null && Float.parseFloat(activeFrequencyStr) > maxRadioFreq) {
+        if (mode != RadioMode.STARTUP && Float.parseFloat(activeFrequencyStr) > maxRadioFreq) {
             tuneToFreq(String.format(java.util.Locale.US, "%.4f", min2mTxFreq), squelch, true);
             callbacks.forceTunedToFreq(activeFrequencyStr);
         }
@@ -428,7 +431,7 @@ public class RadioAudioService extends Service {
         }
     }
 
-    public static String makeSafeHamFreq(String strFreq) {
+    public String makeSafeHamFreq(String strFreq) {
         try {
             float freq = Float.parseFloat(strFreq);
             // Normalize values like "1467" → "146.7"
@@ -815,10 +818,6 @@ public class RadioAudioService extends Service {
         return hostToEsp32 != null;
     }
 
-    public static UsbSerialPort getUsbSerialPort() {
-        return serialPort;
-    }
-
     /**
      * Handles the parsed command received from the ESP32.
      * It processes various commands such as S-meter reports, PTT control,
@@ -1091,7 +1090,7 @@ public class RadioAudioService extends Service {
         // Sanitize message text
         final String outText = text.replace('|', ' ').replace('~', ' ').replace('{', ' ');
         final String targetCallsign = (to == null || to.trim().isEmpty()) ? "CQ" : to;
-        if (callsign == null || callsign.trim().isEmpty()) {
+        if (callsign.trim().isEmpty()) {
             Log.d(TAG, "Error: Tried to send message with no sender callsign.");
             return -1;
         }
