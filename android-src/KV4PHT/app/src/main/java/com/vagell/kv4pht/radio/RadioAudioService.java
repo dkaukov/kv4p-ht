@@ -413,7 +413,7 @@ public class RadioAudioService extends Service {
         }
         activeFrequencyStr = frequencyStr;
         squelch = squelchLevel;
-        if (serialPort != null) {
+        if (isRadioConnected()) {
             hostToEsp32.group(Group.builder()
                 .freqTx(Float.parseFloat(makeSafeHamFreq(activeFrequencyStr)))
                 .freqRx(Float.parseFloat(makeSafeHamFreq(activeFrequencyStr)))
@@ -481,7 +481,7 @@ public class RadioAudioService extends Service {
         activeFrequencyStr = validateFrequency(memory.frequency);
         activeMemoryId = memory.memoryId;
         float txFreq = Float.parseFloat(getTxFreq(memory.frequency, memory.offset, memory.offsetKhz));
-        if (serialPort != null) {
+        if (isRadioConnected()) {
             int rxToneIdx = ToneHelper.getToneIndex(memory.rxTone);
             int txToneIdx = ToneHelper.getToneIndex(memory.txTone);
             hostToEsp32.group(Group.builder()
@@ -691,7 +691,6 @@ public class RadioAudioService extends Service {
         Log.i(TAG, "Connected to ESP32.");
         protocolHandshake.start();
     }
-
 
     /**
      * @param radioType should be RADIO_TYPE_UHF or RADIO_TYPE_VHF
@@ -1061,7 +1060,6 @@ public class RadioAudioService extends Service {
         }
     }
 
-
     /**
      * Sends an acknowledgment message to the specified target callsign.
      *
@@ -1077,7 +1075,6 @@ public class RadioAudioService extends Service {
         APRSPacket aprsPacket = new APRSPacket(callsign, to, digipeaters, msgPacket.getRawBytes());
         txAX25Packet(new Packet(aprsPacket.toAX25Frame()));
     }
-
 
     /**
      * Sends a chat message to the specified recipient.
@@ -1216,7 +1213,7 @@ public class RadioAudioService extends Service {
     public void setHighPower(boolean highPower) {
         if (isHighPower != highPower) {
             isHighPower = highPower;
-            if (hostToEsp32 != null) {
+            if (isRadioConnected()) {
                 hostToEsp32.setHighPower(HlState.builder()
                     .isHighPower(highPower)
                     .build());
