@@ -40,11 +40,14 @@ public class RadioServiceConnector {
     };
 
     public void bind(Consumer<RadioAudioService> onConnected) {
+        bind(new Intent(context, RadioAudioService.class), onConnected);
+    }
+
+    public void bind(Intent intent, Consumer<RadioAudioService> onConnected) {
         if (bound && service != null) {
             onConnected.accept(service);
         } else {
             callbacks.add(onConnected);
-            Intent intent = new Intent(context, RadioAudioService.class);
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
         }
     }
