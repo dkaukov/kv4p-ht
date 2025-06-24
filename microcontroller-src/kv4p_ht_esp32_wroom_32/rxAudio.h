@@ -1,6 +1,6 @@
 /*
 KV4P-HT (see http://kv4p.com)
-Copyright (C) 2024 Vance Vagell
+Copyright (C) 2025 Vance Vagell
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -94,7 +94,7 @@ void initI2SRx() {
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
   config.use_apll = true;
   config.auto_clear = false;
-  config.adc_pin = hw.pins.adcPin;
+  config.adc_pin = hw.pins.pinAudioIn;
   config.sample_rate = AUDIO_SAMPLE_RATE * 1.02; // 2% over sample rate to avoid buffer underruns
   in.begin(config);
   rxEnc.setAudioInfo(rxInfo);

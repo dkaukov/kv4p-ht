@@ -1,6 +1,6 @@
 /*
 KV4P-HT (see http://kv4p.com)
-Copyright (C) 2024 Vance Vagell
+Copyright (C) 2025 Vance Vagell
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -88,21 +88,22 @@ int debug_log_printf(SndCommand cmd, const char* format, ...) {
 void printHardwareConfig() {
 #ifndef RELEASE  
   _LOGI("Hardware Configuration:");
-  _LOGI("  RXD2_PIN     = %d", hw.pins.rxd2Pin);
-  _LOGI("  TXD2_PIN     = %d", hw.pins.txd2Pin);
-  _LOGI("  DAC_PIN      = %d", hw.pins.dacPin);
-  _LOGI("  ADC_PIN      = %d", hw.pins.adcPin);
-  _LOGI("  PTT_PIN      = %d", hw.pins.pttPin);
-  _LOGI("  PD_PIN       = %d", hw.pins.pdPin);
-  _LOGI("  SQ_PIN_HW1   = %d", hw.pins.sqPin);
-  _LOGI("  PHYS_PTT1    = %d", hw.pins.pttPhys1);
-  _LOGI("  PHYS_PTT2    = %d", hw.pins.pttPhys2);
-  _LOGI("  PIXELS_PIN   = %d", hw.pins.pixelsPin);
-  _LOGI("  LED_PIN      = %d", hw.pins.ledPin);
-  _LOGI("  ADC_ATTEN    = %d", hw.adcAttenuation);
-  _LOGI("  ADC_BIAS     = %.3f", hw.adcBias);
-  _LOGI("  VOLUME       = %d", hw.volume);
-  _LOGI("  RF_MODULE_TYPE = %d", hw.rfModuleType);
+  _LOGI("  PIN_RF_RXD     = %d",   hw.pins.pinRfModuleRxd);
+  _LOGI("  PIN_RF_TXD     = %d",   hw.pins.pinRfModuleTxd);
+  _LOGI("  PIN_AUDIO_OUT  = %d",   hw.pins.pinAudioOut);
+  _LOGI("  PIN_AUDIO_IN   = %d",   hw.pins.pinAudioIn);
+  _LOGI("  PIN_PTT        = %d",   hw.pins.pinPtt);
+  _LOGI("  PIN_PD         = %d",   hw.pins.pinPd);
+  _LOGI("  PIN_SQ         = %d",   hw.pins.pinSq);
+  _LOGI("  PIN_PHYS_PTT1  = %d",   hw.pins.pinPttPhys1);
+  _LOGI("  PIN_PHYS_PTT2  = %d",   hw.pins.pinPttPhys2);
+  _LOGI("  PIN_PIXELS     = %d",   hw.pins.pinPixels);
+  _LOGI("  PIN_LED        = %d",   hw.pins.pinLed);
+  _LOGI("  ADC_ATTEN      = %d",   hw.adcAttenuation);
+  _LOGI("  ADC_BIAS       = %.3f", hw.adcBias);
+  _LOGI("  VOLUME         = %d",   hw.volume);
+  _LOGI("  RF_MODULE_TYPE = %s",   hw.rfModuleType == RF_SA818_VHF ? "RF_SA818_VHF" : "RF_SA818_UHF");
+  _LOGI("  PIN_HL         = %d",   hw.pins.pinHl);
 #endif
 }
 

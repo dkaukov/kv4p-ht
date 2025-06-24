@@ -1,6 +1,6 @@
 /*
 KV4P-HT (see http://kv4p.com)
-Copyright (C) 2024 Vance Vagell
+Copyright (C) 2025 Vance Vagell
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -41,23 +41,25 @@ enum RfModuleType {
 #define I2S_ADC_CHANNEL ADC1_CHANNEL_6
 
 // Connections to radio module
-#define DEFAULT_RXD2_PIN      16
-#define DEFAULT_TXD2_PIN      17
-#define DEFAULT_DAC_PIN       25  // This constant not used, just here for reference. GPIO 25 is implied by use of I2S_DAC_CHANNEL_RIGHT_EN.
-#define DEFAULT_ADC_PIN       34  // If this is changed, you may need to manually edit adc1_config_channel_atten() below too.
-#define DEFAULT_PTT_PIN       18  // Keys up the radio module
-#define DEFAULT_PD_PIN        19
-#define DEFAULT_SQ_PIN        32  // 
-#define DEFAULT_PHYS_PTT_PIN1 5   // Optional. Buttons may be attached to either or both of this and next pin. They behave the same.
-#define DEFAULT_PHYS_PTT_PIN2 33  // Optional. See above.
-#define DEFAULT_LED_PIN        2  // Built in LED
-#define DEFAULT_PIXELS_PIN    13  // NeoPixel data pin
-#define DEFAULT_HL_PIN        -1  // High/Low pin for the radio module. -1 means not used.
+#define DEFAULT_PIN_RF_RXD    16
+#define DEFAULT_PIN_RF_TXD    17
+#define DEFAULT_PIN_AUDIO_OUT 25  // This constant not used, just here for reference. GPIO 25 is implied by use of I2S_DAC_CHANNEL_RIGHT_EN.
+#define DEFAULT_PIN_AUDIO_IN  34  // If this is changed, you may need to manually edit adc1_config_channel_atten() below too.
+#define DEFAULT_PIN_PTT       18  // Keys up the radio module
+#define DEFAULT_PIN_PD        19
+#define DEFAULT_PIN_SQ        32  //
+#define DEFAULT_PIN_PHYS_PTT1 5   // Optional. Buttons may be attached to either or both of this and next pin. They behave the same.
+#define DEFAULT_PIN_PHYS_PTT2 33  // Optional. See above.
+#define DEFAULT_PIN_LED        2  // Built in LED
+#define DEFAULT_PIN_PIXELS    13  // NeoPixel data pin
+#define DEFAULT_PIN_HL        -1  // High/Low pin for the radio module. -1 means not used.
+#define DEFAULT_VOLUME         8  // Default SA8x8 module audio volume
 
 #define DEFAULT_ADC_BIAS_VOLTAGE     1.75
 #define DEFAULT_ADC_ATTENUATION      ADC_ATTEN_DB_12
 #define DEFAULT_RF_MODULE_TYPE       RF_SA818_VHF
 #define DEFAULT_VOLUME               8
+#define DEFAULT_STOPPED_COLOR        {0, 32, 0}
 
 // Mode of the app, which is essentially a state machine
 enum Mode {
@@ -80,18 +82,18 @@ struct RGBColor {
 };
 
 struct PinConfig {
-  int8_t sqPin;
-  int8_t rxd2Pin;
-  int8_t txd2Pin;
-  int8_t dacPin;
-  int8_t adcPin;
-  int8_t pttPin;
-  int8_t pdPin;
-  int8_t pttPhys1;
-  int8_t pttPhys2;
-  int8_t ledPin;
-  int8_t pixelsPin;
-  int8_t hlPin;
+  int8_t pinSq;
+  int8_t pinRfModuleRxd;
+  int8_t pinRfModuleTxd;
+  int8_t pinAudioOut;
+  int8_t pinAudioIn;
+  int8_t pinPtt;
+  int8_t pinPd;
+  int8_t pinPttPhys1;
+  int8_t pinPttPhys2;
+  int8_t pinLed;
+  int8_t pinPixels;
+  int8_t pinHl;
 };
 
 struct FeatureFlags {
@@ -111,26 +113,26 @@ struct HWConfig {
 
 HWConfig hw = {
   .pins = {
-    .sqPin = DEFAULT_SQ_PIN,
-    .rxd2Pin = DEFAULT_RXD2_PIN,
-    .txd2Pin = DEFAULT_TXD2_PIN,
-    .dacPin = DEFAULT_DAC_PIN,
-    .adcPin = DEFAULT_ADC_PIN,
-    .pttPin = DEFAULT_PTT_PIN,
-    .pdPin = DEFAULT_PD_PIN,
-    .pttPhys1 = DEFAULT_PHYS_PTT_PIN1,
-    .pttPhys2 = DEFAULT_PHYS_PTT_PIN2,
-    .ledPin = DEFAULT_LED_PIN,
-    .pixelsPin = DEFAULT_PIXELS_PIN,
-    .hlPin = DEFAULT_HL_PIN,
+    .pinSq = DEFAULT_PIN_SQ,
+    .pinRfModuleRxd = DEFAULT_PIN_RF_RXD,
+    .pinRfModuleTxd = DEFAULT_PIN_RF_TXD,
+    .pinAudioOut = DEFAULT_PIN_AUDIO_OUT,
+    .pinAudioIn = DEFAULT_PIN_AUDIO_IN,
+    .pinPtt = DEFAULT_PIN_PTT,
+    .pinPd = DEFAULT_PIN_PD,
+    .pinPttPhys1 = DEFAULT_PIN_PHYS_PTT1,
+    .pinPttPhys2 = DEFAULT_PIN_PHYS_PTT2,
+    .pinLed = DEFAULT_PIN_LED,
+    .pinPixels = DEFAULT_PIN_PIXELS,
+    .pinHl = DEFAULT_PIN_HL,
   },
   .features = {
-    .hasHL = (DEFAULT_HL_PIN != -1),
-    .hasPhysPTT = (DEFAULT_PHYS_PTT_PIN1 != -1 || DEFAULT_PHYS_PTT_PIN2 != -1)
+    .hasHL = (DEFAULT_PIN_HL != -1),
+    .hasPhysPTT = (DEFAULT_PIN_PHYS_PTT1 != -1 || DEFAULT_PIN_PHYS_PTT2 != -1)
   },
   .adcBias = DEFAULT_ADC_BIAS_VOLTAGE,
   .adcAttenuation = DEFAULT_ADC_ATTENUATION,
-  .volume = 8,
-  .stoppedColor = {0, 32, 0},
+  .volume = DEFAULT_VOLUME,
+  .stoppedColor = DEFAULT_STOPPED_COLOR,
   .rfModuleType = DEFAULT_RF_MODULE_TYPE
 };
