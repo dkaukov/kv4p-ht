@@ -51,6 +51,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
+import androidx.lifecycle.ViewModelProvider;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -63,6 +64,7 @@ import com.google.android.material.snackbar.Snackbar;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.radio.RadioAudioService;
+import com.vagell.kv4pht.radio.RadioServiceConnector;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -84,6 +86,10 @@ public class FindRepeatersActivity extends AppCompatActivity {
     private long downloadId = 0; // So we can tell when the download is done
     private List<RepeaterInfo> nearbyRepeaters = null;
     private String locality = null;
+    private MainViewModel viewModel;
+    private RadioServiceConnector serviceConnector;
+    private RadioAudioService radioAudioService;
+    private double latitude = 0, longitude = 0;
 
     // Android permission stuff
     private static final int REQUEST_LOCATION_PERMISSION_CODE = 1;
@@ -91,6 +97,8 @@ public class FindRepeatersActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        serviceConnector = new RadioServiceConnector(this);
+        viewModel = new ViewModelProvider(this).get(MainViewModel.class);
         setContentView(R.layout.activity_find_repeaters);
 
         // Listen for file downloads so we can detect when CSV download is done.
@@ -118,6 +126,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
             return;
         }
 
+        FindRepeatersActivity ctx = this;
         fusedLocationClient.getCurrentLocation(LocationRequest.PRIORITY_HIGH_ACCURACY, cancellationTokenSource.getToken())
                 .addOnSuccessListener(new OnSuccessListener<Location>() {
                     @Override
@@ -127,7 +136,9 @@ public class FindRepeatersActivity extends AppCompatActivity {
                             double latitude = location.getLatitude();
                             double longitude = location.getLongitude();
                             findLocalityAsync(latitude, longitude);
-                            startCSVDownload(latitude, longitude);
+                            ctx.latitude = latitude;
+                            ctx.longitude = longitude;
+                            startCSVDownload();
                         } else {
                             showErrorSnackbar("Failed to find your GPS location (it came back null).");
                             return;
@@ -193,7 +204,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
         }
     }
 
-    private void startCSVDownload(double latitude, double longitude) {
+    private void startCSVDownload() {
         String downloadRepeatersUrlStr = "https://www.repeaterbook.com/repeaters/downloads/csv/index.php?func=prox&features%5B0%5D=FM&lat=" +
                 latitude + "&long=" + longitude + "&distance=25&Dunit=m&band1=14&band2=&call=&use=OPEN&status_id=1";
 
@@ -252,9 +263,51 @@ public class FindRepeatersActivity extends AppCompatActivity {
         webView.loadUrl("https://www.repeaterbook.com");
     }
 
+    /** Alternative method for people who's webview doesn't let us track when login is complete. */
+    public void findRepeatersDownloadButtonClicked(View view) {
+        String downloadRepeatersUrlStr = "https://www.repeaterbook.com/repeaters/downloads/csv/index.php?func=prox&features%5B0%5D=FM&lat=" +
+                latitude + "&long=" + longitude + "&distance=25&Dunit=m&band1=14&band2=&call=&use=OPEN&status_id=1";
+
+        // Initialize the WebView
+        WebView webView = findViewById(R.id.repeaterBookWebView);
+
+        // Enable JavaScript if your webpage needs it
+        webView.getSettings().setJavaScriptEnabled(true);
+
+        webView.setDownloadListener(new DownloadListener() {
+            @Override
+            public void onDownloadStart(String url, String userAgent,
+                                        String contentDisposition, String mimeType,
+                                        long contentLength) {
+                Log.d("DEBUG", "RepeaterBook CSV download started.");
+
+                // Fetch cookies to maintain session
+                String cookies = CookieManager.getInstance().getCookie(url);
+
+                // Now download the file using Android's DownloadManager
+                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                request.addRequestHeader("Cookie", cookies);
+                request.addRequestHeader("User-Agent", userAgent);
+                request.setMimeType(mimeType);
+                request.setDescription("Downloading repeater CSV...");
+                filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                request.setTitle(filename);
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, URLUtil.guessFileName(url, contentDisposition, mimeType));
+
+                DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                downloadId = dm.enqueue(request);
+            }
+        });
+
+        // Load your initial URL
+        webView.loadUrl(downloadRepeatersUrlStr);
+    }
+
     @Override
     protected void onStart() {
         super.onStart();
+        serviceConnector.bind(rs -> this.radioAudioService = rs);
     }
 
     @Override
@@ -270,6 +323,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
         super.onDestroy();
         unregisterReceiver(onDownloadComplete);
         threadPoolExecutor.shutdownNow();
+        serviceConnector.unbind();
     }
 
     /**
@@ -402,7 +456,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
             r.degrees  = tryParseDouble(cols[11]);
 
             // If this repeater is below or above the frequencies this radio is capable of, skip it.
-            if (r.freq < RadioAudioService.minRadioFreq || r.freq > RadioAudioService.maxRadioFreq) {
+            if (radioAudioService == null || r.freq < radioAudioService.getMinRadioFreq() || r.freq > radioAudioService.getMaxRadioFreq()) {
                 continue;
             }
 
@@ -483,41 +537,31 @@ public class FindRepeatersActivity extends AppCompatActivity {
             autoCompleteTextView.setText(locality);
         }
 
+        // Hide "Download" button.
+        findViewById(R.id.findRepeatersDownloadButton).setVisibility(View.GONE);
+
         // Show a "SAVE" button to the right of Cancel.
         findViewById(R.id.findRepeatersSaveButton).setVisibility(View.VISIBLE);
     }
 
     private void populateMemoryGroups() {
         final Activity activity = this;
-        threadPoolExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                if(MainViewModel.appDb == null) {
-                    MainViewModel preloader = new MainViewModel();
-                    preloader.setActivity(activity);
-                    preloader.loadData();
+        threadPoolExecutor.execute(() -> viewModel.loadDataAsync(() -> {
+            List<String> memoryGroups = viewModel.getAppDb().channelMemoryDao().getGroups();
+            // Remove any blank memory groups from the list (shouldn't have been saved, ideally).
+            for (int i = 0; i < memoryGroups.size(); i++) {
+                String name = memoryGroups.get(i);
+                if (name == null || name.trim().length() == 0) {
+                    memoryGroups.remove(i);
+                    i--;
                 }
-                List<String> memoryGroups = MainViewModel.appDb.channelMemoryDao().getGroups();
-
-                // Remove any blank memory groups from the list (shouldn't have been saved, ideally).
-                for (int i = 0; i < memoryGroups.size(); i++) {
-                    String name = memoryGroups.get(i);
-                    if (name == null || name.trim().length() == 0) {
-                        memoryGroups.remove(i);
-                        i--;
-                    }
-                }
-
-                activity.runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        AutoCompleteTextView editMemoryGroupTextView = findViewById(R.id.findRepeatersGroupTextInputEditText);
-                        ArrayAdapter arrayAdapter = new ArrayAdapter(activity, R.layout.dropdown_item, memoryGroups);
-                        editMemoryGroupTextView.setAdapter(arrayAdapter);
-                    }
-                });
             }
-        });
+            activity.runOnUiThread(() -> {
+                AutoCompleteTextView editMemoryGroupTextView = findViewById(R.id.findRepeatersGroupTextInputEditText);
+                ArrayAdapter arrayAdapter = new ArrayAdapter(activity, R.layout.dropdown_item, memoryGroups);
+                editMemoryGroupTextView.setAdapter(arrayAdapter);
+            });
+        }));
     }
 
     public void findRepeatersSaveButtonClicked(View view) {
@@ -530,7 +574,12 @@ public class FindRepeatersActivity extends AppCompatActivity {
             ChannelMemory memory = new ChannelMemory();
             memory.name = r.call + " • " + r.location;
             memory.group = group;
-            memory.frequency = RadioAudioService.makeSafeHamFreq(String.valueOf(r.freq));
+            if (radioAudioService != null) {
+                memory.frequency = radioAudioService.makeSafeHamFreq(String.valueOf(r.freq));
+            } else {
+                Log.e("FindRepeatersActivity", "radioAudioService is null. Cannot set frequency.");
+                continue; // Skip this repeater if radioAudioService is unavailable
+            }
             if (r.offset < 0) {
                 memory.offset = ChannelMemory.OFFSET_DOWN;
             } else if (r.offset > 0) {
@@ -550,7 +599,7 @@ public class FindRepeatersActivity extends AppCompatActivity {
             @Override
             public void run() {
                 for (int i = 0; i < memoriesToAdd.size(); i++) {
-                    MainViewModel.appDb.channelMemoryDao().insertAll(memoriesToAdd.get(i));
+                    viewModel.getAppDb().channelMemoryDao().insertAll(memoriesToAdd.get(i));
                 }
                 setResult(Activity.RESULT_OK, getIntent());
                 finish();

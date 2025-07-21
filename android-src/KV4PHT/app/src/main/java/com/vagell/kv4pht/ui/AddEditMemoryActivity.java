@@ -30,10 +30,12 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import androidx.lifecycle.ViewModelProvider;
 import com.google.android.material.textfield.TextInputEditText;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.radio.RadioAudioService;
+import com.vagell.kv4pht.radio.RadioServiceConnector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,10 +48,15 @@ public class AddEditMemoryActivity extends AppCompatActivity {
     private boolean isVhfRadio = true; // false means UHF radio
     private final ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     private ChannelMemory mMemory;
+    private MainViewModel viewModel;
+    private RadioServiceConnector serviceConnector;
+    private RadioAudioService radioAudioService;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        viewModel = new ViewModelProvider(this).get(MainViewModel.class);
         super.onCreate(savedInstanceState);
+        serviceConnector = new RadioServiceConnector(this);
         setContentView(R.layout.activity_add_edit_memory);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -62,7 +69,7 @@ public class AddEditMemoryActivity extends AppCompatActivity {
             if (!isAdd) { // Edit
                 mMemoryId = extras.getInt("memoryId");
                 threadPoolExecutor.execute(() -> {
-                    mMemory = MainViewModel.appDb.channelMemoryDao().getById(mMemoryId);
+                    mMemory = viewModel.getAppDb().channelMemoryDao().getById(mMemoryId);
                     populateOriginalValues();
                 });
             } else { // Add
@@ -117,6 +124,12 @@ public class AddEditMemoryActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        serviceConnector.bind(rs -> this.radioAudioService = rs);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         // Put the cursor in the name field by default
@@ -128,19 +141,13 @@ public class AddEditMemoryActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         threadPoolExecutor.shutdownNow();
+        serviceConnector.unbind();
     }
 
     private void populateMemoryGroups() {
         final Activity activity = this;
         threadPoolExecutor.execute(() -> {
-            if( MainViewModel.appDb == null ) {
-                //For example direct call other app intent.
-                //If app is not already open do not nullpointer-exception.
-                MainViewModel preloader = new MainViewModel();
-                preloader.setActivity(activity);
-                preloader.loadData();
-            }
-            List<String> memoryGroups = MainViewModel.appDb.channelMemoryDao().getGroups();
+            List<String> memoryGroups = viewModel.getAppDb().channelMemoryDao().getGroups();
 
             // Remove any blank memory groups from the list (shouldn't have been saved, ideally).
             for (int i = 0; i < memoryGroups.size(); i++) {
@@ -290,7 +297,12 @@ public class AddEditMemoryActivity extends AppCompatActivity {
             editFrequencyTextInputEditText.requestFocus();
             return;
         } else {
-            String formattedFrequency = RadioAudioService.makeSafeHamFreq(frequency);
+            if (radioAudioService == null) {
+                editFrequencyTextInputEditText.setError("Service not available. Please try again later.");
+                editFrequencyTextInputEditText.requestFocus();
+                return;
+            }
+            String formattedFrequency = radioAudioService.makeSafeHamFreq(frequency);
             if (formattedFrequency == null) {
                 editFrequencyTextInputEditText.setError("Enter a frequency like 144.0000");
                 editFrequencyTextInputEditText.requestFocus();
@@ -342,9 +354,9 @@ public class AddEditMemoryActivity extends AppCompatActivity {
         final ChannelMemory finalMemory = memory;
         threadPoolExecutor.execute(() -> {
             if (isAdd) {
-                MainViewModel.appDb.channelMemoryDao().insertAll(finalMemory);
+                viewModel.getAppDb().channelMemoryDao().insertAll(finalMemory);
             } else {
-                MainViewModel.appDb.channelMemoryDao().update(finalMemory);
+                viewModel.getAppDb().channelMemoryDao().update(finalMemory);
             }
             setResult(Activity.RESULT_OK, getIntent());
             finish();
