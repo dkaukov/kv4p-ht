@@ -204,13 +204,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onMemoryDelete(ChannelMemory memory) {
                 String freq = memory.frequency;
-                viewModel.deleteMemoryAsync(memory, () -> viewModel.loadDataAsync(() -> {
+                viewModel.deleteMemoryAsync(memory, () -> viewModel.loadDataAsync(() -> runOnUiThread(() -> {
                     memoriesAdapter.notifyDataSetChanged();
                     if (radioAudioService != null) {
                         radioAudioService.tuneToFreq(freq, squelch, false); // Stay on the same freq as the now-deleted memory
                         tuneToFreqUi(freq, false);
                     }
-                }));
+                })));
             }
 
             @Override
@@ -961,6 +961,7 @@ public class MainActivity extends AppCompatActivity {
         if (max2m != null) radioAudioService.setMax2mTxFreq(Integer.parseInt(max2m));
         if (min70 != null) radioAudioService.setMin70cmTxFreq(Integer.parseInt(min70));
         if (max70 != null) radioAudioService.setMax70cmTxFreq(Integer.parseInt(max70));
+        radioAudioService.updateFrequencyLimitsForBand();
     }
 
     private void applyBandwidthAndGain(Map<String, String> settings) {
@@ -1799,7 +1800,7 @@ public class MainActivity extends AppCompatActivity {
         switch (requestCode) {
             case REQUEST_ADD_MEMORY:
                 if (resultCode == Activity.RESULT_OK) {
-                    viewModel.loadDataAsync(() -> memoriesAdapter.notifyDataSetChanged());
+                    viewModel.loadDataAsync(() -> runOnUiThread(() -> memoriesAdapter.notifyDataSetChanged()));
                 }
                 break;
             case REQUEST_EDIT_MEMORY:
