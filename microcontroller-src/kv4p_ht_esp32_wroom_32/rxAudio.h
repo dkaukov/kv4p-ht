@@ -20,7 +20,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <AudioTools.h>
 #include <AudioTools/AudioCodecs/CodecOpus.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <driver/dac_oneshot.h>
+#else
 #include <driver/dac.h>
+#endif
 #include <esp_task_wdt.h>
 #include "globals.h"
 #include "protocol.h"
@@ -77,12 +81,23 @@ Boost gain(16.0);
 DCOffsetRemover dcOffsetRemover(DECAY_TIME, AUDIO_SAMPLE_RATE);
 
 inline void injectADCBias() {
-  dac_output_enable(DAC_CHANNEL_2);  // GPIO26 (DAC1)
-  dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * hw.adcBias);
+#if SOC_DAC_SUPPORTED
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+  dac_oneshot_handle_t dac_handle;
+  dac_oneshot_config_t dac_config = {
+      .chan_id = DAC_CHAN_1  // GPIO26 (DAC1)
+  };
+  ESP_ERROR_CHECK(dac_oneshot_new_channel(&dac_config, &dac_handle));
+  ESP_ERROR_CHECK(dac_oneshot_output_voltage(dac_handle, (255.0 / 3.3) * hw.adcBias));
+  ESP_ERROR_CHECK(dac_oneshot_del_channel(dac_handle));
+#else
+  dac_output_enable(DAC_CHANNEL_1); // GPIO26 (DAC1)
+  dac_output_voltage(DAC_CHANNEL_1, (255.0 / 3.3) * hw.adcBias);
+#endif
+#endif 
 } 
 
 inline void setUpADCAttenuator() {
-  adc1_config_channel_atten(I2S_ADC_CHANNEL, hw.adcAttenuation);
 }
 
 void initI2SRx() {
@@ -92,10 +107,19 @@ void initI2SRx() {
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
-  config.use_apll = true;
+#ifdef HAS_ESP32_DAC  
+  config.use_apll = false;
+#endif  
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+  config.adc_calibration_active = false;
+  config.adc_attenuation = hw.adcAttenuation;
+  config.adc_channels[0] = I2S_ADC_CHANNEL; // GPIO34
+  config.sample_rate = AUDIO_SAMPLE_RATE * 1.22;
+#else
   config.auto_clear = false;
   config.adc_pin = hw.pins.pinAudioIn;
   config.sample_rate = AUDIO_SAMPLE_RATE * 1.02; // 2% over sample rate to avoid buffer underruns
+#endif  
   in.begin(config);
   rxEnc.setAudioInfo(rxInfo);
   // configure OPUS additinal parameters

@@ -29,10 +29,17 @@ const RGBColor COLOR_TX = {16, 16, 0};
 const RGBColor COLOR_BLACK = {0, 0, 0};
 
 void neopixelColor(const RGBColor &c, uint8_t bright = 255) {
+  if (hw.pins.pinPixels < 0) {
+    return; // No pixels configured
+  }
   uint8_t red = (uint16_t(c.red) * bright + 128) >> 8;
   uint8_t green = (uint16_t(c.green) * bright + 128) >> 8;
   uint8_t blue = (uint16_t(c.blue) * bright + 128) >> 8;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)  
+  rgbLedWrite(hw.pins.pinPixels, red, green, blue);
+#else
   neopixelWrite(hw.pins.pinPixels, red, green, blue);
+#endif
 }
 
 // Calculate a float between min and max, that ramps from min to max in half of breath_every,

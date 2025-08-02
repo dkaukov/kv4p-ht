@@ -105,8 +105,8 @@ public class RadioAudioService extends Service implements PacketHandler {
     public static final String INTENT_OPEN_CHAT = "com.vagell.kv4pht.OPEN_CHAT_ACTION";
 
     // === USB Device Matching ===
-    private static final int[] ESP32_VENDOR_IDS = {4292, 6790};
-    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987};
+    private static final int[] ESP32_VENDOR_IDS = {4292, 6790, 12346};
+    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987, 4097};
 
     // === Audio Constants ===
     public static final int AUDIO_SAMPLE_RATE = 48000;
@@ -653,8 +653,8 @@ public class RadioAudioService extends Service implements PacketHandler {
             return;
         }
         try { // These settings needed for better data transfer on Adafruit QT Py ESP32-S2
-            serialPort.setRTS(true);
-            serialPort.setDTR(true);
+            //serialPort.setRTS(true);
+            //serialPort.setDTR(true);
         } catch (Exception e) {
             // Ignore, may not be supported on all devices.
         }

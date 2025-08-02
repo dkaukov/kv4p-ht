@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <lwip/def.h>
 #include <Arduino.h>
 #include <DRA818.h>
 #include <esp_task_wdt.h>
@@ -34,8 +35,8 @@ const uint16_t FIRMWARE_VER = 14;
 const uint32_t RSSI_REPORT_INTERVAL_MS = 100;
 const uint16_t USB_BUFFER_SIZE = 1024*2;
 
-DRA818 sa818_vhf(&Serial2, SA818_VHF);
-DRA818 sa818_uhf(&Serial2, SA818_UHF);
+DRA818 sa818_vhf(&Serial1, SA818_VHF);
+DRA818 sa818_uhf(&Serial1, SA818_UHF);
 DRA818 &sa818 = sa818_vhf;
 
 // Were we able to communicate with the radio module during setup()?
@@ -80,6 +81,11 @@ void setup() {
   Serial.setRxBufferSize(USB_BUFFER_SIZE);
   Serial.setTxBufferSize(USB_BUFFER_SIZE);
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  while (!Serial.isConnected()) {
+    // Wait here
+  }
+#endif  
   Serial.println();
   Serial.println("===== kv4p serial output =====");
   Serial.println("This port will emit binary data using the kv4p protocol.");
@@ -87,9 +93,22 @@ void setup() {
   Serial.println("Use `logcat` or a kv4p decoder to view readable logs.");
   Serial.println("More info: https://github.com/VanceVagell/kv4p-ht/blob/main/microcontroller-src/kv4p_ht_esp32_wroom_32/readme.md");
   Serial.println("==============================");
-  // Configure watch dog timer (WDT), which will reset the system if it gets stuck somehow.
-  esp_task_wdt_init(10, true);  // Reboot if locked up for a bit
-  esp_task_wdt_add(NULL);       // Add the current task to WDT watch
+  // Configure watchdog timer (WDT), which will reset the system if it gets stuck.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)  
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 10000,  // 10 seconds timeout
+    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Watch all cores
+    .trigger_panic = true 
+  };
+  // Initialize and enable task watchdog
+  ESP_ERROR_CHECK(esp_task_wdt_reconfigure(&wdt_config));
+  ESP_ERROR_CHECK(esp_task_wdt_add(NULL)); // Add the current task to WDT watch
+#else
+  esp_task_wdt_init(10, false); // 10 seconds timeout, no panic
+  esp_task_wdt_add(NULL); // Add the current task to WDT watch
+#endif
+
+
   buttonsSetup();
   // Set up radio module defaults
   pinMode(hw.pins.pinPd, OUTPUT);
@@ -102,8 +121,8 @@ void setup() {
     digitalWrite(hw.pins.pinHl, LOW);  // High power
   }
   // Communication with DRA818V radio module via GPIO pins
-  Serial2.begin(9600, SERIAL_8N1, hw.pins.pinRfModuleRxd, hw.pins.pinRfModuleTxd);
-  Serial2.setTimeout(10);  // Very short so we don't tie up rx audio while reading from radio module (responses are tiny so this is ok)
+  Serial1.begin(9600, SERIAL_8N1, hw.pins.pinRfModuleRxd, hw.pins.pinRfModuleTxd);
+  Serial1.setTimeout(10);  // Very short so we don't tie up rx audio while reading from radio module (responses are tiny so this is ok)
   //
   debugSetup();
   // Begin in STOPPED mode
@@ -207,8 +226,8 @@ void rssiLoop() {
       // TODO fix the dra818 library's implementation of rssi(). Right now it just drops the
       // return value from the module, and just tells us success/fail.
       // int rssi = dra->rssi();
-      Serial2.println("RSSI?");
-      String rssiResponse = Serial2.readString();
+      Serial1.println("RSSI?");
+      String rssiResponse = Serial1.readString();
       if (rssiResponse.length() > 7) {
         String rssiStr = rssiResponse.substring(5);
         int rssiInt    = rssiStr.toInt();

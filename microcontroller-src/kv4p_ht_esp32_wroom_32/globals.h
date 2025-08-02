@@ -18,7 +18,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <Arduino.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_adc/adc_oneshot.h>
+#else
 #include <driver/adc.h>
+#endif
 
 // RF module types
 enum RfModuleType {
@@ -38,7 +42,7 @@ enum RfModuleType {
 
 // I2S audio sampling stuff
 #define I2S_ADC_UNIT    ADC_UNIT_1
-#define I2S_ADC_CHANNEL ADC1_CHANNEL_6
+#define I2S_ADC_CHANNEL ADC_CHANNEL_6
 
 // Connections to radio module
 #define DEFAULT_PIN_RF_RXD    16
