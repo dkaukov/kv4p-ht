@@ -192,7 +192,12 @@ public class RadioAudioService extends Service implements PacketHandler {
     @Setter
     private boolean hasHighLowPowerSwitch = false;
     @Getter
+    @Setter
+    private boolean hasPhysPttButton = false;
+    @Getter
     private boolean isHighPower = true;
+    @Getter
+    private boolean isRssiOn = true;
     @Getter
     private boolean txAllowed = true;
     @Setter
@@ -428,6 +433,7 @@ public class RadioAudioService extends Service implements PacketHandler {
             return;
         }
         activeFrequencyStr = frequencyStr;
+        activeMemoryId = -1; // Reset active memory ID since we're tuning to a frequency, not a memory.
         squelch = squelchLevel;
         if (isRadioConnected()) {
             hostToEsp32.group(Group.builder()
@@ -563,6 +569,11 @@ public class RadioAudioService extends Service implements PacketHandler {
     }
 
     public void startPtt() {
+        if (hostToEsp32 == null) {
+            Log.e(TAG, "Attempted to start PTT but hostToEsp32 is null. USB connection likely failed.");
+            callbacks.radioMissing(); // Notify UI that connection is problematic
+            return;
+        }
         if (mode == RadioMode.RX && txAllowed) {
             setMode(RadioMode.TX);
             callbacks.sMeterUpdate(0);
@@ -1164,6 +1175,27 @@ public class RadioAudioService extends Service implements PacketHandler {
                 hostToEsp32.setHighPower(HlState.builder()
                     .isHighPower(highPower)
                     .build());
+            }
+        }
+    }
+
+    /**
+     * Sets whether radio module should poll RSSI. We need to be able to turn this off
+     * because in v1.x versions of the PCB there's cross-talk between the Serial2 trace and
+     * the audio trace, which breaks APRS decoding (and any other digital mode we might add).
+     * See https://github.com/VanceVagell/kv4p-ht/issues/310 for context.
+     *
+     * This will send the new state to the ESP32 if it is connected.
+     *
+     * @param on true to enable RSSI, false to disable it.
+     */
+    public void setRssi(boolean on) {
+        if (isRssiOn != on) {
+            isRssiOn = on;
+            if (isRadioConnected()) {
+                hostToEsp32.setRssi(Protocol.RSSIState.builder()
+                        .on(isRssiOn)
+                        .build());
             }
         }
     }
