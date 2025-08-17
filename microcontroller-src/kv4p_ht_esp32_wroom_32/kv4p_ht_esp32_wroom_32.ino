@@ -96,7 +96,7 @@ void setup() {
   // Configure watchdog timer (WDT), which will reset the system if it gets stuck.
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)  
   esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 10000,  // 10 seconds timeout
+    .timeout_ms = 20000,  // 20 seconds timeout
     .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Watch all cores
     .trigger_panic = true 
   };
@@ -112,7 +112,7 @@ void setup() {
   buttonsSetup();
   // Set up radio module defaults
   pinMode(hw.pins.pinPd, OUTPUT);
-  digitalWrite(hw.pins.pinPd, HIGH);  // Power on
+  digitalWrite(hw.pins.pinPd, HIGH);  // Power off
   pinMode(hw.pins.pinSq, INPUT);
   pinMode(hw.pins.pinPtt, OUTPUT);
   digitalWrite(hw.pins.pinPtt, HIGH);  // Rx

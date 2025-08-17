@@ -42,7 +42,7 @@ enum RfModuleType {
 
 // I2S audio sampling stuff
 #define I2S_ADC_UNIT    ADC_UNIT_1
-#define I2S_ADC_CHANNEL ADC_CHANNEL_6
+#define I2S_ADC_CHANNEL ADC_CHANNEL_0
 
 // Connections to radio module
 #define DEFAULT_PIN_RF_RXD    16

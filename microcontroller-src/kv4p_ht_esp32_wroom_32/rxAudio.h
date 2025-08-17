@@ -113,8 +113,8 @@ void initI2SRx() {
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
   config.adc_calibration_active = false;
   config.adc_attenuation = hw.adcAttenuation;
-  config.adc_channels[0] = I2S_ADC_CHANNEL; // GPIO34
-  config.sample_rate = AUDIO_SAMPLE_RATE * 1.22;
+  config.adc_channels[0] = I2S_ADC_CHANNEL; 
+  config.sample_rate = AUDIO_SAMPLE_RATE;
 #else
   config.auto_clear = false;
   config.adc_pin = hw.pins.pinAudioIn;

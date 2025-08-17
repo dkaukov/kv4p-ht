@@ -38,10 +38,12 @@ void initI2STx() {
   auto config = out.defaultConfig(TX_MODE);
   config.copyFrom(txInfo);
   config.pin_data = hw.pins.pinAudioOut;
-  config.pin_ws = 27;
+  config.pin_ws = -1;
+  config.pin_bck = -1;
   config.use_apll = true;
   config.auto_clear = false;
   config.signal_type = PDM;
+  config.sample_rate = AUDIO_SAMPLE_RATE * 1.00;
   out.begin(config);
   // configure OPUS additinal parameters
   txDec.setAudioInfo(txInfo);
