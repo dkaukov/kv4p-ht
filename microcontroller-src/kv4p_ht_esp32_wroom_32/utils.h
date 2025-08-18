@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <Arduino.h>
 #include "globals.h"
+#include "soc/adc_channel.h"
 
 #define EVERY_N_MILLISECONDS(INTERVAL) \
     do { \
@@ -55,3 +56,61 @@ public:
     lastDebounceTime = millis();
   }
 };
+
+inline bool gpioToAdc(int8_t gpio, adc_unit_t &unit, adc_channel_t &channel) {
+#if defined(ADC1_CHANNEL_0_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_0_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_0; return true; }
+#endif
+#if defined(ADC1_CHANNEL_1_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_1_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_1; return true; }
+#endif
+#if defined(ADC1_CHANNEL_2_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_2_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_2; return true; }
+#endif
+#if defined(ADC1_CHANNEL_3_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_3_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_3; return true; }
+#endif
+#if defined(ADC1_CHANNEL_4_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_4_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_4; return true; }
+#endif
+#if defined(ADC1_CHANNEL_5_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_5_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_5; return true; }
+#endif
+#if defined(ADC1_CHANNEL_6_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_6_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_6; return true; }
+#endif
+#if defined(ADC1_CHANNEL_7_GPIO_NUM)
+    if (gpio == ADC1_CHANNEL_7_GPIO_NUM) { unit = ADC_UNIT_1; channel = ADC_CHANNEL_7; return true; }
+#endif
+#if defined(ADC2_CHANNEL_0_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_0_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_0; return true; }
+#endif
+#if defined(ADC2_CHANNEL_1_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_1_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_1; return true; }
+#endif
+#if defined(ADC2_CHANNEL_2_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_2_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_2; return true; }
+#endif
+#if defined(ADC2_CHANNEL_3_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_3_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_3; return true; }
+#endif
+#if defined(ADC2_CHANNEL_4_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_4_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_4; return true; }
+#endif
+#if defined(ADC2_CHANNEL_5_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_5_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_5; return true; }
+#endif
+#if defined(ADC2_CHANNEL_6_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_6_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_6; return true; }
+#endif
+#if defined(ADC2_CHANNEL_7_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_7_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_7; return true; }
+#endif
+#if defined(ADC2_CHANNEL_8_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_8_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_8; return true; }
+#endif
+#if defined(ADC2_CHANNEL_9_GPIO_NUM)
+    if (gpio == ADC2_CHANNEL_9_GPIO_NUM) { unit = ADC_UNIT_2; channel = ADC_CHANNEL_9; return true; }
+#endif
+    return false; // not an ADC-capable pin
+}
