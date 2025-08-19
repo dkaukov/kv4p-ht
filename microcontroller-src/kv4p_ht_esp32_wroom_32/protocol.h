@@ -120,26 +120,42 @@ struct [[gnu::packed]] RSSIState {
 };
 REQUIRE_TRIVIALLY_COPYABLE(RSSIState);
 
+void writeAll(Stream &s, const uint8_t *src, size_t len) {
+  size_t totalWritten = 0;
+  while (totalWritten < len) {
+      size_t written = s.write(src + totalWritten, len - totalWritten);
+      totalWritten += written;
+      esp_task_wdt_reset();
+  }
+}
+
 /**
  * Send a command with params
- * Format: [DELIMITER(8 bytes)] [CMD(1 byte)] [paramLen(1 byte)] [param data(N bytes)]
+ * Format: [DELIMITER(8 bytes)] [CMD(1 byte)] [paramLen(2 byte)] [param data(N bytes)]
  */
+typedef struct {
+    uint8_t delimiter[DELIMITER_LENGTH]; // 8 bytes
+    uint8_t command;                     // 1 byte
+    uint8_t paramLenLE[2];               // 2 bytes (little-endian uint16_t)
+    uint8_t payload[PROTO_MTU];          // up to PROTO_MTU bytes
+} ProtocolFrame;
 void __sendCmdToHost(SndCommand cmd, const uint8_t *params, size_t paramsLen) {
-  // Safety check: limit paramsLen to 255 for 1-byte length
-  if (paramsLen > PROTO_MTU) {
-    paramsLen = PROTO_MTU;  // or handle differently (split, or error, etc.)
-  }
-  // 1. Leading delimiter
-  Serial.write(COMMAND_DELIMITER, DELIMITER_LENGTH);
-  // 2. Command byte
-  Serial.write((uint8_t*) &cmd, 1);
-  // 3. Parameter length
-  uint16_t len = paramsLen;
-  Serial.write((uint8_t*) &len, sizeof(len));
-  // 4. Parameter bytes
-  if (paramsLen > 0) {
-    Serial.write(params, paramsLen);
-  }
+    if (paramsLen > PROTO_MTU) {
+        paramsLen = PROTO_MTU;
+    }
+    static ProtocolFrame frame;
+    // Fill header
+    memcpy(frame.delimiter, COMMAND_DELIMITER, DELIMITER_LENGTH);
+    frame.command = (uint8_t)cmd;
+    frame.paramLenLE[0] = (uint8_t)(paramsLen & 0xFF);        // LSB
+    frame.paramLenLE[1] = (uint8_t)((paramsLen >> 8) & 0xFF); // MSB
+    // Copy payload
+    if (paramsLen > 0) {
+        memcpy(frame.payload, params, paramsLen);
+    }
+    // Total frame size = header + payload
+    size_t totalSize = DELIMITER_LENGTH + 1 + 2 + paramsLen;
+    writeAll(Serial, (const uint8_t *)&frame, totalSize);
 }
 
 void inline __sendCmdToHost(SndCommand cmd) {

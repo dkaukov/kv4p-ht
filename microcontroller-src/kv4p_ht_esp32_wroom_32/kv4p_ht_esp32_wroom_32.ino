@@ -80,13 +80,17 @@ void setMode(Mode newMode) {
 void setup() {
   boardSetup();
   // Communication with Android via USB cable
+#if ARDUINO_USB_CDC_ON_BOOT
+  Serial.begin(115200);
   Serial.setRxBufferSize(USB_BUFFER_SIZE);
   Serial.setTxBufferSize(USB_BUFFER_SIZE);
-  Serial.begin(115200);
-#if ARDUINO_USB_CDC_ON_BOOT
   while (!Serial.isConnected()) {
     // Wait here
   }
+#else  
+  Serial.setRxBufferSize(USB_BUFFER_SIZE);
+  Serial.setTxBufferSize(USB_BUFFER_SIZE);
+  Serial.begin(115200);
 #endif  
   Serial.println();
   Serial.println("===== kv4p serial output =====");
