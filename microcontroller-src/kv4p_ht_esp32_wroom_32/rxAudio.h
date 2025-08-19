@@ -156,6 +156,7 @@ private:
 };
 
 bool rxStreamConfigured = false;
+bool rxEncConfigured = false;
 AnalogAudioStream in;
 AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
 OpusAudioEncoder rxEnc;
@@ -209,30 +210,33 @@ void initI2SRx() {
   config.sample_rate = AUDIO_SAMPLE_RATE * 1.02; // 2% over sample rate to avoid buffer underruns
 #endif  
   in.begin(config);
-  rxEnc.setAudioInfo(rxInfo);
-  // configure OPUS additinal parameters
-  auto &encoderConfig = rxEnc.config();
-  encoderConfig.application = OPUS_APPLICATION_AUDIO;
-  encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_40_MS;
-  encoderConfig.vbr = 1;
-  encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
-  rxEnc.begin(encoderConfig);
-  // effects
-  effects.clear();
-  effects.addEffect(dcOffsetRemover);
-  effects.addEffect(gain);
-  effects.addEffect(mute);
-  //effects.addEffect(sineEffect);
-  effects.begin(rxInfo);
-  // open output
-  rxOut.begin(rxInfo);
+  if (!rxEncConfigured) {
+    rxEnc.setAudioInfo(rxInfo);
+    // configure OPUS additinal parameters
+    auto &encoderConfig = rxEnc.config();
+    encoderConfig.application = OPUS_APPLICATION_AUDIO;
+    encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_40_MS;
+    encoderConfig.vbr = 1;
+    encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
+    rxEnc.begin(encoderConfig);
+    // effects
+    effects.clear();
+    effects.addEffect(dcOffsetRemover);
+    effects.addEffect(gain);
+    effects.addEffect(mute);
+    //effects.addEffect(sineEffect);
+    effects.begin(rxInfo);
+    // open output
+    rxOut.begin(rxInfo);
+  }
+  rxEncConfigured = true;
   rxStreamConfigured = true;
 }
 
 void endI2SRx() {
   if (rxStreamConfigured) {
-    rxOut.end();
-    effects.end();
+    //rxOut.end();
+    //effects.end();
     in.end();
   }
   rxStreamConfigured = false;
