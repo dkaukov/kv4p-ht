@@ -16,5 +16,5 @@ ADC_ATTEN,data,i8,3
 ADC_BIAS,data,string,0.00
 STOPPED_COLOR,data,hex2bin,202020
 RF_MODULE_TYPE,data,u8,1
-VOLUME,data,u8,6
+VOLUME,data,u8,4
 PIN_HL,data,i8,-1
