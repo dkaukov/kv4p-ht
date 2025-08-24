@@ -490,6 +490,9 @@ public class MainActivity extends AppCompatActivity {
                         viewModel.getAppDb().aprsMessageDao().insertAll(myBeacon);
                         viewModel.loadDataAsync(() -> runOnUiThread(() -> aprsAdapter.notifyDataSetChanged()));
                     });
+
+                    // Show a quick snackbar letting the user know we beaconed (so they can stop it if this is surprising)
+                    showSimpleSnackbar("Transmitted APRS beacon on this frequency");
                 }
 
                 @Override
@@ -736,13 +739,6 @@ public class MainActivity extends AppCompatActivity {
                 // frequency. User must set it manually (or select it before coming to chat mode, but
                 // can't be scanning).
                 radioAudioService.setScanning(false, true);
-
-                // If this is a v1.x radio, disable RSSI when in APRS chat mode.
-                // See https://github.com/VanceVagell/kv4p-ht/issues/310.
-                if (!radioAudioService.isHasPhysPttButton()) { // Poor proxy for "Is this a v1.x PCB?"
-                    radioAudioService.setRssi(false);
-                    findViewById(R.id.sMeter).setVisibility(View.GONE);
-                }
             }
             setScanningUi(false);
 
@@ -990,9 +986,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyFiltersSettings(Map<String, String> settings) {
-        boolean emphasis = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_EMPHASIS, "true"));
-        boolean highpass = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_HIGHPASS, "true"));
-        boolean lowpass = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_LOWPASS, "true"));
+        boolean emphasis = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_EMPHASIS, "false"));
+        boolean highpass = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_HIGHPASS, "false"));
+        boolean lowpass = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_LOWPASS, "false"));
         if (radioAudioService != null && radioAudioService.isRadioConnected()) {
             threadPoolExecutor.execute(() -> {
                 if (radioAudioService.getMode() != RadioMode.STARTUP && radioAudioService.getMode() != RadioMode.SCAN) {

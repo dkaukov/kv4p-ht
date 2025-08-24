@@ -202,7 +202,7 @@ public class RadioAudioService extends Service implements PacketHandler {
     @Getter
     @Setter
     private int aprsPositionAccuracy = APRS_POSITION_EXACT;
-    private final ScheduledExecutorService aprsPositionExecutor = Executors.newSingleThreadScheduledExecutor();
+    private ScheduledExecutorService beaconScheduler;
     private ScheduledFuture<?> beaconFuture;
     private int messageNumber = 0;
 
@@ -290,8 +290,13 @@ public class RadioAudioService extends Service implements PacketHandler {
 
     @Override
     public IBinder onBind(Intent intent) {
-        // Retrieve necessary parameters from the intent.
         Bundle bundle = intent.getExtras();
+        if (null == bundle) {
+            Log.d(TAG, "Warning: RadioAudioService started without parameters, likely in a bad state.");
+            return binder;
+        }
+
+        // Retrieve necessary parameters from the intent.
         callsign = bundle.getString("callsign");
         squelch = bundle.getInt("squelch");
         activeMemoryId = bundle.getInt("activeMemoryId");
@@ -329,14 +334,51 @@ public class RadioAudioService extends Service implements PacketHandler {
         if (this.aprsBeaconPosition != enabled) {
             this.aprsBeaconPosition = enabled;
             if (enabled) {
-                beaconFuture = aprsPositionExecutor.scheduleWithFixedDelay(this::sendPositionBeacon,
-                    0, APRS_BEACON_MINS, TimeUnit.MINUTES);
-                // Tell callback we started (e.g. so it can show a SnackBar letting user know)
-                callbacks.aprsBeaconing(true, aprsPositionAccuracy);
+                startBeaconScheduler();
             } else if (beaconFuture != null) {
-                beaconFuture.cancel(true);
-                beaconFuture = null;
+                stopBeaconScheduler();
             }
+        }
+    }
+
+    private void startBeaconScheduler() {
+        if (beaconScheduler == null || beaconScheduler.isShutdown()) {
+            beaconScheduler = Executors.newSingleThreadScheduledExecutor();
+        }
+        // Cancel any old task
+        if (beaconFuture != null) {
+            beaconFuture.cancel(false);
+        }
+
+        // First run now (or after initial delay), then every 5 minutes
+        beaconFuture = beaconScheduler.scheduleAtFixedRate(() -> {
+            try {
+                // Acquire a short wakelock just for the beacon if you prefer not to keep it held.
+                if (wakeLock != null && !wakeLock.isHeld()) {
+                    // 20 seconds is usually ample for a single beacon
+                    wakeLock.acquire(20_000);
+                }
+                if (aprsBeaconPosition) {
+                    sendPositionBeacon();  // uses FusedLocation + TX
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "Beacon task error", t);
+            } finally {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    try { wakeLock.release(); } catch (Throwable ignored) {}
+                }
+            }
+        }, 0, APRS_BEACON_MINS, TimeUnit.MINUTES);
+    }
+
+    private void stopBeaconScheduler() {
+        if (beaconFuture != null) {
+            beaconFuture.cancel(false);
+            beaconFuture = null;
+        }
+        if (beaconScheduler != null) {
+            beaconScheduler.shutdownNow();
+            beaconScheduler = null;
         }
     }
 
@@ -357,19 +399,6 @@ public class RadioAudioService extends Service implements PacketHandler {
                 Thread.currentThread().interrupt();
             } catch (IOException e) {
                 Log.e(TAG, "Error while restart ESP32.", e);
-            }
-        }
-
-        // Manage WakeLock based on mode to prevent CPU throttling during critical operations.
-        if (mode == RadioMode.RX || mode == RadioMode.SCAN) {
-            // Acquire WakeLock if not already held to ensure audio processing continues in background.
-            if (wakeLock != null && !wakeLock.isHeld()) {
-                wakeLock.acquire();
-            }
-        } else {
-            // Release WakeLock for other states to save power, but don't stop the service.
-            if (wakeLock != null && wakeLock.isHeld()) {
-                wakeLock.release();
             }
         }
 
@@ -510,8 +539,8 @@ public class RadioAudioService extends Service implements PacketHandler {
         protocolHandshake.onDestroy();
 
         // Clean up APRS beacon executor
-        if (aprsPositionExecutor != null && !aprsPositionExecutor.isShutdown()) {
-            aprsPositionExecutor.shutdownNow();
+        if (this.beaconScheduler != null && !beaconScheduler.isShutdown()) {
+            beaconScheduler.shutdownNow();
         }
 
         // Clean up USB resources to prevent race conditions on restart
@@ -735,7 +764,7 @@ public class RadioAudioService extends Service implements PacketHandler {
     public void startPtt() {
         if (hostToEsp32 == null) {
             Log.e(TAG, "Attempted to start PTT but hostToEsp32 is null. USB connection likely failed.");
-            callbacks.radioMissing(); // Notify UI that connection is problematic
+            radioMissing();
             return;
         }
         if (mode == RadioMode.RX && txAllowed) {
@@ -779,7 +808,7 @@ public class RadioAudioService extends Service implements PacketHandler {
             return;
         }
         Log.w(TAG, "No ESP32 detected");
-        callbacks.radioMissing();
+        radioMissing();
     }
 
     private boolean isESP32Device(UsbDevice device) {
@@ -806,7 +835,7 @@ public class RadioAudioService extends Service implements PacketHandler {
         List<UsbSerialDriver> availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager);
         if (availableDrivers.isEmpty()) {
             Log.e(TAG, "Error: no available USB drivers.");
-            callbacks.radioMissing();
+            radioMissing();
             return;
         }
         // Open a connection to the first available driver.
@@ -814,7 +843,7 @@ public class RadioAudioService extends Service implements PacketHandler {
         UsbDeviceConnection connection = manager.openDevice(driver.getDevice());
         if (connection == null) {
             Log.e(TAG, "Error: couldn't open USB device.");
-            callbacks.radioMissing();
+            radioMissing();
             return;
         }
         serialPort = driver.getPorts().get(0); // Most devices have just one port (port 0)
@@ -824,7 +853,7 @@ public class RadioAudioService extends Service implements PacketHandler {
             serialPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
         } catch (Exception e) {
             Log.e(TAG, "Error: couldn't open USB serial port.");
-            callbacks.radioMissing();
+            radioMissing();
             return;
         }
         try { // These settings needed for better data transfer on Adafruit QT Py ESP32-S2
@@ -861,6 +890,23 @@ public class RadioAudioService extends Service implements PacketHandler {
         hostToEsp32 = new Protocol.Sender(usbIoManager);
         Log.i(TAG, "Connected to ESP32.");
         protocolHandshake.start();
+    }
+
+    // Callback for ProtocolHandshake
+    public void radioConnected() {
+        // Acquire WakeLock if not already held to ensure audio processing continues in background.
+        if (wakeLock != null && !wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+        callbacks.radioConnected();
+    }
+
+    // Called in many situations where radio connection is found to be broken
+    private void radioMissing() {
+        callbacks.radioMissing(); // Notify UI that radio wasn't found
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release(); // Don't keep screen on
+        }
     }
 
     /**
@@ -1182,7 +1228,7 @@ public class RadioAudioService extends Service implements PacketHandler {
             return;
         }
         if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(getBaseContext()) != ConnectionResult.SUCCESS) {
-            Log.d(TAG, "Missing Google Play Services — cannot retrieve GPS location.");
+            Log.d(TAG, "Can't get GPS position: missing Google Play Services.");
             callbacks.unknownLocation();
             return;
         }
@@ -1221,7 +1267,7 @@ public class RadioAudioService extends Service implements PacketHandler {
             final APRSPacket aprsPacket = new APRSPacket(callsign, "BEACON", DEFAULT_DIGIPEATERS, posField.getRawBytes());
             aprsPacket.getPayload().addAprsData(APRSTypes.T_POSITION, posField);
             txAX25Packet(new Packet(aprsPacket.toAX25Frame()));
-            callbacks.sentAprsBeacon(latitude, longitude);
+            callbacks.sentAprsBeacon(myPos.getLatitude(), myPos.getLongitude());
         } catch (Exception e) {
             Log.w(TAG, "Exception while trying to beacon APRS location.", e);
         }
