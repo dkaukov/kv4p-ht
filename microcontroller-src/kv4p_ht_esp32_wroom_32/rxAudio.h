@@ -187,9 +187,11 @@ inline void injectADCBias() {
 } 
 
 inline void setUpADCAttenuator() {
+#if defined(HAS_ESP32_DAC) || ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0 , 0)
   adc_channel_t channel; adc_unit_t unit;
   gpioToAdc(hw.pins.pinAudioIn, unit, channel);
   adc1_config_channel_atten((adc1_channel_t) channel, hw.adcAttenuation);
+#endif   
 }
 
 void initI2SRx() {
