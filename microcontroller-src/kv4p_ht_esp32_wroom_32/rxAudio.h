@@ -196,18 +196,16 @@ void initI2SRx() {
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
-#ifdef HAS_ESP32_DAC  
-  config.use_apll = false;
+#if defined(HAS_ESP32_DAC) || ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0 , 0)
+  config.use_apll = true;
 #endif  
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
   config.adc_calibration_active = false;
   config.adc_attenuation = hw.adcAttenuation;
   gpioToAdc(hw.pins.pinAudioIn, config.adc_unit, config.adc_channels[0]);
-  config.sample_rate = AUDIO_SAMPLE_RATE * 1.02;
 #else
   config.auto_clear = false;
   config.adc_pin = hw.pins.pinAudioIn;
-  config.sample_rate = AUDIO_SAMPLE_RATE * 1.02; // 2% over sample rate to avoid buffer underruns
 #endif  
   in.begin(config);
   if (!rxEncConfigured) {
@@ -215,9 +213,10 @@ void initI2SRx() {
     // configure OPUS additinal parameters
     auto &encoderConfig = rxEnc.config();
     encoderConfig.application = OPUS_APPLICATION_AUDIO;
-    encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_40_MS;
+    encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_20_MS;
     encoderConfig.vbr = 1;
     encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
+    encoderConfig.signal = OPUS_SIGNAL_MUSIC;
     rxEnc.begin(encoderConfig);
     // effects
     effects.clear();

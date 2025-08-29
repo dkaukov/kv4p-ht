@@ -31,7 +31,7 @@ enum RfModuleType {
 };
 
 // Audio sampling rate, must match what Android app expects (and sends).
-#define AUDIO_SAMPLE_RATE 48000
+#define AUDIO_SAMPLE_RATE 16000
 
 // Maximum length of the frame
 #define PROTO_MTU 2048
@@ -39,10 +39,6 @@ enum RfModuleType {
 // Offset to make up for fact that sampling is slightly slower than requested, and we don't want underruns.
 // But if this is set too high, then we get audio skips instead of underruns. So there's a sweet spot.
 #define SAMPLING_RATE_OFFSET 0
-
-// I2S audio sampling stuff
-#define I2S_ADC_UNIT    ADC_UNIT_1
-#define I2S_ADC_CHANNEL ADC_CHANNEL_0
 
 // Connections to radio module
 #define DEFAULT_PIN_RF_RXD    16

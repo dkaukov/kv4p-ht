@@ -30,6 +30,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "board.h"
 
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 const uint16_t FIRMWARE_VER = 15;
 
 const uint32_t RSSI_REPORT_INTERVAL_MS = 100;
