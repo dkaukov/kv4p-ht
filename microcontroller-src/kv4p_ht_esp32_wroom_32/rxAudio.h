@@ -180,13 +180,16 @@ inline void injectADCBias() {
   ESP_ERROR_CHECK(dac_oneshot_output_voltage(dac_handle, (255.0 / 3.3) * hw.adcBias));
   ESP_ERROR_CHECK(dac_oneshot_del_channel(dac_handle));
 #else
-  dac_output_enable(DAC_CHANNEL_1); // GPIO26 (DAC1)
-  dac_output_voltage(DAC_CHANNEL_1, (255.0 / 3.3) * hw.adcBias);
+  dac_output_enable(DAC_CHANNEL_2); // GPIO26 (DAC1)
+  dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * hw.adcBias);
 #endif
 #endif 
 } 
 
 inline void setUpADCAttenuator() {
+  adc_channel_t channel; adc_unit_t unit;
+  gpioToAdc(hw.pins.pinAudioIn, unit, channel);
+  adc1_config_channel_atten((adc1_channel_t) channel, hw.adcAttenuation);
 }
 
 void initI2SRx() {
@@ -212,11 +215,11 @@ void initI2SRx() {
     rxEnc.setAudioInfo(rxInfo);
     // configure OPUS additinal parameters
     auto &encoderConfig = rxEnc.config();
-    encoderConfig.application = OPUS_APPLICATION_AUDIO;
+    encoderConfig.application = OPUS_APPLICATION_VOIP;
     encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_20_MS;
     encoderConfig.vbr = 1;
     encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
-    encoderConfig.signal = OPUS_SIGNAL_MUSIC;
+    encoderConfig.signal = OPUS_SIGNAL_VOICE;
     rxEnc.begin(encoderConfig);
     // effects
     effects.clear();

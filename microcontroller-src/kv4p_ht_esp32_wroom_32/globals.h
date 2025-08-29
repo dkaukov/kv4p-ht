@@ -31,7 +31,7 @@ enum RfModuleType {
 };
 
 // Audio sampling rate, must match what Android app expects (and sends).
-#define AUDIO_SAMPLE_RATE 16000
+#define AUDIO_SAMPLE_RATE 48000 / 2
 
 // Maximum length of the frame
 #define PROTO_MTU 2048
