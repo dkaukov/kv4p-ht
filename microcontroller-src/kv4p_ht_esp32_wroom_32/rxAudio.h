@@ -217,11 +217,11 @@ void initI2SRx() {
     rxEnc.setAudioInfo(rxInfo);
     // configure OPUS additinal parameters
     auto &encoderConfig = rxEnc.config();
-    encoderConfig.application = OPUS_APPLICATION_VOIP;
+    encoderConfig.application = OPUS_APPLICATION_AUDIO;
     encoderConfig.frame_sizes_ms_x2 = OPUS_FRAMESIZE_20_MS;
     encoderConfig.vbr = 1;
     encoderConfig.max_bandwidth = OPUS_BANDWIDTH_NARROWBAND;
-    encoderConfig.signal = OPUS_SIGNAL_VOICE;
+    encoderConfig.signal = OPUS_SIGNAL_MUSIC;
     rxEnc.begin(encoderConfig);
     // effects
     effects.clear();

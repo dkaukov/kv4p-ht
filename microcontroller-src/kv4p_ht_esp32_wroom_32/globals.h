@@ -30,8 +30,12 @@ enum RfModuleType {
   RF_SA818_UHF = 1,
 };
 
-// Audio sampling rate, must match what Android app expects (and sends).
-#define AUDIO_SAMPLE_RATE 48000 / 2
+// Audio sampling rate. The Opus encoder resamples during encode, so it can be different to host.
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#define AUDIO_SAMPLE_RATE 16000
+#elif defined(ESP32)
+#define AUDIO_SAMPLE_RATE 48000
+#endif
 
 // Maximum length of the frame
 #define PROTO_MTU 2048
