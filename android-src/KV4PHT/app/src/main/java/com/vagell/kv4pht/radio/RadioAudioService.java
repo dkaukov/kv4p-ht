@@ -68,6 +68,7 @@ import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
+import com.ustadmobile.codec2.Codec2;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.aprs.parser.APRSPacket;
 import com.vagell.kv4pht.aprs.parser.APRSTypes;
@@ -95,6 +96,7 @@ import com.vagell.kv4pht.ui.MainActivity;
 import com.vagell.kv4pht.ui.ToneHelper;
 
 import java.io.IOException;
+import java.nio.ShortBuffer;
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.*;
@@ -179,10 +181,18 @@ public class RadioAudioService extends Service implements PacketHandler {
     private AudioTrack audioTrack;
     private float audioTrackVolume = 0.0f;
     private AudioFocusRequest audioFocusRequest;
-    private final OpusUtils.OpusDecoderWrapper opusDecoder =
-        new OpusUtils.OpusDecoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
-    private final OpusUtils.OpusEncoderWrapper opusEncoder =
-        new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+    private final OpusUtils.OpusDecoderWrapper opusDecoder = new OpusUtils.OpusDecoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+    private final OpusUtils.OpusEncoderWrapper opusEncoder = new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+
+    private final long _freedv = Codec2.freedvCreate(Codec2.FREEDV_MODE_2400B, false, 0.0f, 0);
+    private final short[] __modemTxBuffer = new short[Codec2.freedvGetNomModemSamples(_freedv)];
+    private final short[] _speechRxBuffer = new short[Codec2.freedvGetMaxSpeechSamples(_freedv)];
+    private final ShortBuffer  _speechSamples  = ShortBuffer.allocate(1024*10);
+
+    private final long  _freedvData = Codec2.freedvCreate(12, false, 0.0f, 1);
+    private final byte[] _dataBuffer = new byte[Codec2.freedvGetBitsPerModemFrame(_freedvData) / 8];
+    private final short[] _dataSamplesBuffer = new short[Codec2.freedvGetNTxSamples(_freedvData)];
+    private final ShortBuffer _dataSamples  = ShortBuffer.allocate(1024*10);
 
     // === USB / Serial ===
     private UsbManager usbManager;
