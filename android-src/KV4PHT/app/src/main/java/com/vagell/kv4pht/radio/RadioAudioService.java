@@ -20,6 +20,7 @@ package com.vagell.kv4pht.radio;
 
 import static com.vagell.kv4pht.radio.Protocol.DRA818_12K5;
 import static com.vagell.kv4pht.radio.Protocol.DRA818_25K;
+import static com.vagell.kv4pht.radio.Protocol.PROTO_MTU;
 
 import android.Manifest;
 import android.app.Notification;
@@ -124,10 +125,10 @@ public class RadioAudioService extends Service implements PacketHandler {
     private static final int[] ESP32_PRODUCT_IDS = {60000, 29987};
 
     // === Audio Constants ===
-    public static final int AUDIO_SAMPLE_RATE = 48000;
+    public static final int AUDIO_SAMPLE_RATE = 8000;
     private static final int RX_AUDIO_CHANNEL_CONFIG = AudioFormat.CHANNEL_OUT_MONO;
     private static final int RX_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_FLOAT;
-    public static final int OPUS_FRAME_SIZE = 1920; // 40ms at 48kHz
+    public static final int OPUS_FRAME_SIZE = 160; // 40ms at 48kHz
     private static final int RX_AUDIO_MIN_BUFFER_SIZE =
             AudioTrack.getMinBufferSize(
                     AUDIO_SAMPLE_RATE,
@@ -177,24 +178,16 @@ public class RadioAudioService extends Service implements PacketHandler {
     public enum RadioModuleType {UNKNOWN, VHF, UHF}
 
     // === Audio / Opus Handling ===
-    private final float[] pcmFloat = new float[OPUS_FRAME_SIZE];
+    //private final float[] pcmFloat = new float[OPUS_FRAME_SIZE];
     private AudioTrack audioTrack;
     private float audioTrackVolume = 0.0f;
     private AudioFocusRequest audioFocusRequest;
-    private final OpusUtils.OpusDecoderWrapper opusDecoder = new OpusUtils.OpusDecoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
-    private final OpusUtils.OpusEncoderWrapper opusEncoder = new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+    private final OpusUtils.OpusDecoderWrapper opusDecoderX = new OpusUtils.OpusDecoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+    private final OpusUtils.OpusEncoderWrapper opusEncoderX = new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
+    private final FreeDvUtils.Tx freedvTx = new FreeDvUtils.Tx(Codec2.FREEDV_MODE_2400B, OPUS_FRAME_SIZE, opusEncoderX, PROTO_MTU);
+    private final FreeDvUtils.Rx freedvRx = new FreeDvUtils.Rx(Codec2.FREEDV_MODE_2400B, /*squelchSnr=*/3.0f, OPUS_FRAME_SIZE, opusDecoderX);
 
-    private final long _freedv = Codec2.freedvCreate(Codec2.FREEDV_MODE_2400B, false, 0.0f, 0);
-    private final short[] __modemTxBuffer = new short[Codec2.freedvGetNomModemSamples(_freedv)];
-    private final short[] _speechRxBuffer = new short[Codec2.freedvGetMaxSpeechSamples(_freedv)];
-    private final ShortBuffer  _speechSamples  = ShortBuffer.allocate(1024*10);
-
-    private final long  _freedvData = Codec2.freedvCreate(12, false, 0.0f, 1);
-    private final byte[] _dataBuffer = new byte[Codec2.freedvGetBitsPerModemFrame(_freedvData) / 8];
-    private final short[] _dataSamplesBuffer = new short[Codec2.freedvGetNTxSamples(_freedvData)];
-    private final ShortBuffer _dataSamples  = ShortBuffer.allocate(1024*10);
-
-    // === USB / Serial ===
+  // === USB / Serial ===
     private UsbManager usbManager;
     @Getter
     private UsbSerialPort serialPort;
@@ -1048,9 +1041,8 @@ public class RadioAudioService extends Service implements PacketHandler {
         if (!dataMode) {
             samples = applyMicGain(samples);
         }
-        byte[] audioFrame = new byte[Protocol.PROTO_MTU];
-        int encodedLength = opusEncoder.encode(samples, audioFrame);
-        hostToEsp32.txAudio(java.util.Arrays.copyOfRange(audioFrame, 0, encodedLength));
+        int encodedLength = freedvTx.pushSpeechFrame(samples, samples.length);
+        hostToEsp32.txAudio(java.util.Arrays.copyOfRange(freedvTx.packetBuffer(), 0, encodedLength));
     }
 
     public boolean isRadioConnected() {
@@ -1149,7 +1141,8 @@ public class RadioAudioService extends Service implements PacketHandler {
      * @param len   The length of the audio data in bytes.
      */
     private void handleRxAudio(final byte[] param, final Integer len) {
-        int decoded = opusDecoder.decode(param, len, pcmFloat);
+        int decoded = freedvRx.pushOpusPacket(param, len);
+        float[] pcmFloat = freedvRx.speechFloatBuffer();
 
         if (getMode() == RadioMode.RX || getMode() == RadioMode.SCAN) {
             afskDemodulator.addSamples(pcmFloat, decoded);
