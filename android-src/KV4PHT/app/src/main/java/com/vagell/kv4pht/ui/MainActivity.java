@@ -1634,8 +1634,8 @@ public class MainActivity extends AppCompatActivity {
         int samplesPerAnimFrame = RadioAudioService.AUDIO_SAMPLE_RATE / RECORD_ANIM_FPS;
         float[] audioBuffer = new float[RadioAudioService.OPUS_FRAME_SIZE];
         while (isRecording) {
-            int samples = audioRecord.read(audioBuffer, 0, RadioAudioService.OPUS_FRAME_SIZE, AudioRecord.READ_BLOCKING);
-            if (samples == RadioAudioService.OPUS_FRAME_SIZE) {
+            int samples = audioRecord.read(audioBuffer, 0, 320, AudioRecord.READ_BLOCKING);
+            if (samples == 320) {
                 if (!radioAudioService.isRadioConnected()) {
                     throw new IllegalStateException("Radio not connected, cannot send audio.");
                 }

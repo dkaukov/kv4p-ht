@@ -2,8 +2,11 @@ package com.vagell.kv4pht.radio;
 
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
+import java.util.function.IntConsumer;
 
 import com.ustadmobile.codec2.Codec2;
+import com.vagell.kv4pht.radio.OpusUtils.OpusDecoderWrapper;
+import com.vagell.kv4pht.radio.OpusUtils.OpusEncoderWrapper;
 
 public final class FreeDvUtils {
 
@@ -51,95 +54,48 @@ public final class FreeDvUtils {
      */
     public static final class Tx implements AutoCloseable {
 
-        private final long h;
-        private final int speechInPerFrame;
-        private final int modemOutMax;
+        private final long _freedv;
+        private final short[] _modemTxBuffer;
+        private final short[] pcmBuffer;
+        private final ShortRing _modemTxRingBuffer;
         private final int opusFrameSamples;
-        private final OpusUtils.OpusEncoderWrapper opus;
-
-        // Internals
-        private final short[] speechPcm;
-        private final short[] modemPcm;
-        private final ShortRing modemRb;
-        private final short[] oneOpusShort;
-        private final float[] opusFloat;
+        private final OpusEncoderWrapper opusEncoder;
         private final byte[] pktBuf;
-        private int lastPktLen = 0;
+        private final short[] opusFrame;
 
-        public Tx(int freedvMode, int opusFrameSamples, OpusUtils.OpusEncoderWrapper opusEncoder, int mtuBytes) {
-            this.h = Codec2.freedvCreate(freedvMode, false, 0f, 1);
-            if (h == 0) {
-                throw new IllegalStateException("freedvCreate(TX) failed");
-            }
-
-            this.speechInPerFrame = Codec2.freedvGetNSpeechSamples(h);
-            this.modemOutMax = Codec2.freedvGetMaxModemSamples(h);
+        public Tx(int freedvMode, int opusFrameSamples, OpusEncoderWrapper opusEncoder, int mtuBytes) {
+            this._freedv = Codec2.freedvCreate(freedvMode, false, 0f, 1);   // unset for speech
+            this._modemTxBuffer = new short[Codec2.freedvGetNomModemSamples(_freedv)];
+            this.pcmBuffer = new short[opusFrameSamples];
+            this._modemTxRingBuffer = new ShortRing(opusFrameSamples * 3);
             this.opusFrameSamples = opusFrameSamples;
-            this.opus = opusEncoder;
-
-            this.speechPcm = new short[speechInPerFrame];
-            this.modemPcm = new short[modemOutMax];
-            this.modemRb = new ShortRing(opusFrameSamples * 8);
-            this.oneOpusShort = new short[opusFrameSamples];
-            this.opusFloat = new float[opusFrameSamples];
+            this.opusEncoder = opusEncoder;
             this.pktBuf = new byte[mtuBytes];
+            this.opusFrame = new short[this.opusFrameSamples];
         }
 
         /**
          * Feed one speech frame (len must equal speechFrameSize). Returns Opus packet length (0 if none ready).
          */
-        public int pushSpeechFrame(float[] speech8k, int len) {
-            if (len != speechInPerFrame) {
-                throw new IllegalArgumentException("len=" + len + " != speechFrameSize=" + speechInPerFrame);
+        public void pushSpeechFrame(float[] speech8k, int len, IntConsumer onFrameSamples) {
+            for (int i = 0; i < len; i++) {
+                pcmBuffer[i] = (short) (speech8k[i] * 32768.0f);
             }
-
-            // float -> pcm16
-            for (int i = 0; i < speechInPerFrame; i++) {
-                float x = speech8k[i];
-                if (x > 1f) {
-                    x = 1f;
-                } else if (x < -1f) {
-                    x = -1f;
-                }
-                speechPcm[i] = (short) Math.round(x * 32767f);
+            int encoded = (int) Codec2.freedvTx(_freedv, _modemTxBuffer, pcmBuffer);
+            _modemTxRingBuffer.write(_modemTxBuffer, encoded);
+            while (_modemTxRingBuffer.available()  >= opusFrameSamples) {
+                _modemTxRingBuffer.read(opusFrame, opusFrameSamples);
+                onFrameSamples.accept(opusEncoder.encode(opusFrame, pktBuf));
             }
-
-            int nModem = (int) Codec2.freedvTx(h, modemPcm, speechPcm);
-            if (nModem > 0) {
-                modemRb.write(modemPcm, nModem);
-            }
-
-            if (modemRb.available() >= opusFrameSamples) {
-                modemRb.read(oneOpusShort, opusFrameSamples);
-                for (int i = 0; i < opusFrameSamples; i++) {
-                    opusFloat[i] = oneOpusShort[i] / 32768f;
-                }
-                lastPktLen = opus.encode(opusFloat, pktBuf);
-                return Math.max(0, lastPktLen);
-            }
-            lastPktLen = 0;
-            return 0;
-        }
-
-        public byte[] packetBuffer() {
-            return pktBuf;
-        }
-
-        public int lastPacketLength() {
-            return lastPktLen;
-        }
-
-        public int speechFrameSize() {
-            return speechInPerFrame;
-        }
-
-        public int opusFrameSize() {
-            return opusFrameSamples;
         }
 
         @Override
         public void close() {
-            Codec2.freedvDestroy(h);
+            Codec2.freedvDestroy(_freedv);
+        }
+
+        public byte[] packetBuffer() {
+            return pktBuf;
         }
     }
 
@@ -154,10 +110,10 @@ public final class FreeDvUtils {
         private final short[] speechRxBuffer;
         ShortBuffer speechSamples;
         FloatBuffer pcmFloatBuffer;
-        private final OpusUtils.OpusDecoderWrapper opus;
+        private final OpusDecoderWrapper opus;
         private final short[] modemTmp;
 
-        public Rx(int freedvMode, float squelchSnr, int opusFrameSamples, OpusUtils.OpusDecoderWrapper opusDecoder) {
+        public Rx(int freedvMode, float squelchSnr, int opusFrameSamples, OpusDecoderWrapper opusDecoder) {
             freeDv = Codec2.freedvCreate(freedvMode, true, squelchSnr, 0);   // unset for speech
             if (freeDv == 0) {
                 throw new IllegalStateException("freedvCreate(RX) failed");

@@ -183,8 +183,8 @@ public class RadioAudioService extends Service implements PacketHandler {
     private float audioTrackVolume = 0.0f;
     private AudioFocusRequest audioFocusRequest;
     private final OpusUtils.OpusDecoderWrapper opusDecoderX = new OpusUtils.OpusDecoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
-    private final OpusUtils.OpusEncoderWrapper opusEncoderX = new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, OPUS_FRAME_SIZE);
-    private final FreeDvUtils.Tx freedvTx = new FreeDvUtils.Tx(Codec2.FREEDV_MODE_2400B, OPUS_FRAME_SIZE, opusEncoderX, PROTO_MTU);
+    private final OpusUtils.OpusEncoderWrapper opusEncoderX = new OpusUtils.OpusEncoderWrapper(AUDIO_SAMPLE_RATE, 320);
+    private final FreeDvUtils.Tx freedvTx = new FreeDvUtils.Tx(Codec2.FREEDV_MODE_2400B, 320, opusEncoderX, PROTO_MTU);
     private final FreeDvUtils.Rx freedvRx = new FreeDvUtils.Rx(Codec2.FREEDV_MODE_2400B, /*squelchSnr=*/3.0f, OPUS_FRAME_SIZE, opusDecoderX);
 
   // === USB / Serial ===
@@ -1041,8 +1041,8 @@ public class RadioAudioService extends Service implements PacketHandler {
         if (!dataMode) {
             samples = applyMicGain(samples);
         }
-        int encodedLength = freedvTx.pushSpeechFrame(samples, samples.length);
-        hostToEsp32.txAudio(java.util.Arrays.copyOfRange(freedvTx.packetBuffer(), 0, encodedLength));
+       freedvTx.pushSpeechFrame(samples, 320, encodedLength ->
+           hostToEsp32.txAudio(java.util.Arrays.copyOfRange(freedvTx.packetBuffer(), 0, encodedLength)));
     }
 
     public boolean isRadioConnected() {

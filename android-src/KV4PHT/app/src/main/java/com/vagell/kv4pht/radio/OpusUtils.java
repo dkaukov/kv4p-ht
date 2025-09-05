@@ -59,6 +59,11 @@ public final class OpusUtils {
             }
             return encoder.encode(pcmBuffer, 0, frameSize, opusData, 0, opusData.length);
         }
+
+        @SneakyThrows
+        public int encode(short[] frame, byte[] opusData) {
+            return encoder.encode(frame, 0, frameSize, opusData, 0, opusData.length);
+        }
     }
 }
 
