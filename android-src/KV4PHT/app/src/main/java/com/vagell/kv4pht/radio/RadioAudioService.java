@@ -128,7 +128,7 @@ public class RadioAudioService extends Service implements PacketHandler {
     public static final int AUDIO_SAMPLE_RATE = 8000;
     private static final int RX_AUDIO_CHANNEL_CONFIG = AudioFormat.CHANNEL_OUT_MONO;
     private static final int RX_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_FLOAT;
-    public static final int OPUS_FRAME_SIZE = 160; // 40ms at 48kHz
+    public static final int OPUS_FRAME_SIZE = 1920; // 40ms at 48kHz
     private static final int RX_AUDIO_MIN_BUFFER_SIZE =
             AudioTrack.getMinBufferSize(
                     AUDIO_SAMPLE_RATE,

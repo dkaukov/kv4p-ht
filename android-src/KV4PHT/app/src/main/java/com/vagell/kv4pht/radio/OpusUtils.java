@@ -31,6 +31,11 @@ public final class OpusUtils {
             }
             return decodedSamples;
         }
+
+        @SneakyThrows
+        public int decode(byte[] opusData, int len, short[] shortsData) {
+            return decoder.decode(opusData, 0, len, shortsData, 0, frameSize, false);
+        }
     }
 
     public static class OpusEncoderWrapper {
