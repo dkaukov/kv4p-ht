@@ -67,7 +67,7 @@ public final class FreeDvUtils {
             this._freedv = Codec2.freedvCreate(freedvMode, false, 0f, 1);   // unset for speech
             this._modemTxBuffer = new short[Codec2.freedvGetNomModemSamples(_freedv)];
             this.pcmBuffer = new short[opusFrameSamples];
-            this._modemTxRingBuffer = new ShortRing(opusFrameSamples * 3);
+            this._modemTxRingBuffer = new ShortRing(opusFrameSamples * 10);
             this.opusFrameSamples = opusFrameSamples;
             this.opusEncoder = opusEncoder;
             this.pktBuf = new byte[mtuBytes];
