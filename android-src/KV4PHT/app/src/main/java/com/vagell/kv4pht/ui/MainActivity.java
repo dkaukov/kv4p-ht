@@ -788,7 +788,6 @@ public class MainActivity extends AppCompatActivity {
                 findViewById(R.id.sendButtonOverlay).setVisibility(GONE);
             }
         } else if (screenType == ScreenType.SCREEN_VOICE){
-            radioAudioService.setRssi(true);
             hideKeyboard();
             findViewById(R.id.frequencyContainer).setVisibility(VISIBLE);
             findViewById(R.id.rxAudioCircle).setVisibility(VISIBLE);
@@ -1530,8 +1529,15 @@ public class MainActivity extends AppCompatActivity {
         while (isRecording) {
             int samples = audioRecord.read(audioBuffer, 0, RadioAudioService.OPUS_FRAME_SIZE, AudioRecord.READ_BLOCKING);
             if (samples == RadioAudioService.OPUS_FRAME_SIZE) {
-                if (!radioAudioService.isRadioConnected()) {
-                    throw new IllegalStateException("Radio not connected, cannot send audio.");
+                if (null == radioAudioService || !radioAudioService.isRadioConnected()) {
+                    Log.d("DEBUG", "Error: Could not contact radio in processAudioStream() while recording.");
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            stopRecording();
+                        }
+                    });
+                    return;
                 }
                 radioAudioService.sendAudioToESP32(audioBuffer, false);
                 // Accumulate samples across buffers
@@ -1670,7 +1676,7 @@ public class MainActivity extends AppCompatActivity {
             showCallsignSnackbar(getString(R.string.set_your_callsign_to_beacon_your_position));
             return;
         }
-        if (radioAudioService != null) {
+        if (null == radioAudioService) {
             return;
         }
         ensurePermissions(List.of(Manifest.permission.ACCESS_FINE_LOCATION), allGranted -> {
@@ -1915,7 +1921,10 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
         });
-        moreMenu.getMenu().findItem(R.id.flash_firmware).setEnabled(radioAudioService.isRadioConnected());
+
+        boolean showRadioOptions = radioAudioService != null && radioAudioService.isRadioConnected();
+        moreMenu.getMenu().findItem(R.id.flash_firmware).setEnabled(showRadioOptions);
+        moreMenu.getMenu().findItem(R.id.import_from_repeaterbook).setEnabled(showRadioOptions);
         moreMenu.show();
     }
 
