@@ -21,13 +21,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <driver/adc.h>
 
 // RF module types
-enum RfModuleType {
+enum RfModuleType : uint8_t {
   RF_SA818_VHF = 0,
   RF_SA818_UHF = 1,
 };
 
 // Audio sampling rate, must match what Android app expects (and sends).
 #define AUDIO_SAMPLE_RATE 48000
+
+// Firmware AX.25 TX tuning. Lead/tail silence matches the previous Android-side AFSK encoder timing.
+static constexpr size_t TX_AFSK_BLOCK_SAMPLES = 256;
+static constexpr float TX_AFSK_GAIN = 0.8f;
+static constexpr float TX_AFSK_LEAD_SILENCE_MS = 1100.0f;
+static constexpr float TX_AFSK_TAIL_SILENCE_MS = 700.0f;
 
 // Maximum length of the frame
 #define PROTO_MTU 2048
@@ -74,6 +80,9 @@ bool squelched = false;
 
 // Forward declarations
 void setMode(Mode newMode);
+Mode rxIdleMode();
+void sendCurrentDeviceState();
+void markDeviceStateDirty();
 
 struct [[gnu::packed]] RGBColor {
   uint8_t red;
