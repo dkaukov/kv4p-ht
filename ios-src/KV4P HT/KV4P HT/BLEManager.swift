@@ -228,7 +228,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         case 0x07:
             audioFrameCount += 1
             let frameData = Data(body)
-            Task { await audio.feedOpusFrame(frameData) }
+            audio.feedAdpcmFrame(frameData)
         case 0x09:
             break
         case 0x0B:
