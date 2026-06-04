@@ -1,0 +1,259 @@
+import Foundation
+import CoreBluetooth
+
+private let NUS_SERVICE_UUID = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+private let NUS_TX_CHAR_UUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+private let NUS_RX_CHAR_UUID = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
+
+enum BLEState {
+    case idle, scanning, connecting, connected, ready
+}
+
+struct DiscoveredDevice: Identifiable {
+    let id: UUID
+    let peripheral: CBPeripheral
+    let name: String
+    var rssi: Int
+}
+
+@Observable
+class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    var bleState: BLEState = .idle
+    var discoveredDevices: [DiscoveredDevice] = []
+    var hello: HelloFrame?
+    var deviceState: DeviceStateFrame?
+    var audioFrameCount: Int = 0
+    var logEntries: [String] = []
+    var bleUnavailable = false
+    var audioPlaying = false
+    var audioAvailable = false
+
+    private let audio = AudioManager()
+    private var central: CBCentralManager!
+    private var peripheral: CBPeripheral?
+    private var txChar: CBCharacteristic?
+    private var rxChar: CBCharacteristic?
+    private var parser = KissParser()
+    private var seq: UInt32 = 0
+
+    override init() {
+        super.init()
+        central = CBCentralManager(delegate: self, queue: .main)
+        audioAvailable = audio.isAvailable  // nonisolated — no await needed
+    }
+
+    func startScan() {
+        guard central.state == .poweredOn else { return }
+        discoveredDevices = []
+        bleState = .scanning
+        central.scanForPeripherals(withServices: [NUS_SERVICE_UUID],
+                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+        log("Scanning for KV4P-HT...")
+    }
+
+    func stopScan() {
+        central.stopScan()
+        if bleState == .scanning { bleState = .idle }
+    }
+
+    func connect(_ device: DiscoveredDevice) {
+        stopScan()
+        bleState = .connecting
+        peripheral = device.peripheral
+        peripheral?.delegate = self
+        central.connect(device.peripheral)
+        log("Connecting to \(device.name)...")
+    }
+
+    func disconnect() {
+        if let p = peripheral { central.cancelPeripheralConnection(p) }
+    }
+
+    func sendDesiredState(freq: Float, squelch: UInt8,
+                          ptt: Bool = false, txAllowed: Bool = false, highPower: Bool = false) {
+        var flags: UInt16 = HOST_STATE_RADIO_CONFIG_VALID
+                          | HOST_STATE_RSSI_ENABLED
+                          | HOST_STATE_RX_AUDIO_OPEN
+                          | HOST_STATE_ENABLE_STATUS_REPORTS
+        if highPower { flags |= HOST_STATE_HIGH_POWER }
+        if ptt       { flags |= HOST_STATE_PTT_REQUESTED }
+        if txAllowed { flags |= HOST_STATE_TX_ALLOWED }
+        seq += 1
+        let payload = buildDesiredState(sequence: seq, freq: freq, squelch: squelch, flags: flags)
+        let frame   = buildKv4pVendorFrame(command: 0x0D, payload: payload)
+        writeRaw(frame)
+        log(String(format: "→ DesiredState %.4f MHz sq=%d ptt=%d hp=%d",
+                   freq, squelch, ptt ? 1 : 0, highPower ? 1 : 0))
+    }
+
+    // MARK: – CBCentralManagerDelegate
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch central.state {
+        case .poweredOn:
+            bleUnavailable = false
+            log("BLE ready")
+        case .poweredOff:
+            bleUnavailable = true
+            bleState = .idle
+            log("BLE powered off")
+        case .unauthorized:
+            bleUnavailable = true
+            log("BLE unauthorized — check permissions")
+        default:
+            break
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        let name = peripheral.name ?? "KV4P-HT"
+        let rssi = RSSI.intValue
+        if let idx = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
+            discoveredDevices[idx].rssi = rssi
+        } else {
+            discoveredDevices.append(DiscoveredDevice(
+                id: peripheral.identifier, peripheral: peripheral, name: name, rssi: rssi))
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        bleState = .connected
+        log("Connected — discovering services")
+        peripheral.discoverServices([NUS_SERVICE_UUID])
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        bleState = .idle
+        log("Connect failed: \(error?.localizedDescription ?? "unknown")")
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        bleState = .idle
+        self.peripheral = nil
+        txChar = nil
+        rxChar = nil
+        hello = nil
+        deviceState = nil
+        audioFrameCount = 0
+        parser.reset()
+        audioPlaying = false
+        Task { await audio.stop() }
+        log("Disconnected")
+    }
+
+    // MARK: – CBPeripheralDelegate
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let services = peripheral.services else { return }
+        for service in services where service.uuid == NUS_SERVICE_UUID {
+            peripheral.discoverCharacteristics([NUS_TX_CHAR_UUID, NUS_RX_CHAR_UUID], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard let chars = service.characteristics else { return }
+        for char in chars {
+            switch char.uuid {
+            case NUS_TX_CHAR_UUID:
+                txChar = char
+                peripheral.setNotifyValue(true, for: char)
+                log("TX char found — subscribing")
+            case NUS_RX_CHAR_UUID:
+                rxChar = char
+                log("RX char found")
+            default:
+                break
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        if characteristic.uuid == NUS_TX_CHAR_UUID && characteristic.isNotifying {
+            log("TX notifications active — waiting for HELLO (~1s)")
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateValueFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard let data = characteristic.value else { return }
+        let frames = parser.feed(data)
+        for (cmd, payload) in frames {
+            switch cmd {
+            case 0x06: handleVendorFrame(payload)
+            case 0x00: log("← AX.25 \(payload.count)B")
+            default:   break
+            }
+        }
+    }
+
+    // MARK: – Private
+
+    private func handleVendorFrame(_ payload: Data) {
+        guard payload.count >= 6,
+              payload.prefix(4) == Data(KV4P_VENDOR_PREFIX),
+              payload[4] == KV4P_PROTOCOL_VERSION
+        else { return }
+
+        let command = payload[5]
+        let body    = payload.dropFirst(6)
+
+        switch command {
+        case 0x06:
+            if let h = parseHello(Data(body)) {
+                hello = h
+                deviceState = h.deviceState
+                bleState = .ready
+                log(String(format: "← HELLO fw=%d %@ %.0f–%.0f MHz",
+                    h.firmwareVersion,
+                    h.rfModuleType == 0 ? "VHF" : "UHF",
+                    h.minFreq, h.maxFreq))
+                Task {
+                    await audio.start()
+                    audioPlaying = await audio.isPlaying
+                    log(audioPlaying ? "Audio engine started" : "Audio unavailable (Opus decoder not found)")
+                }
+                // ESP32 won't stream audio until it receives DesiredState with RX_AUDIO_OPEN.
+                // Use freq from HELLO deviceState; clamp to sane range as a sanity check.
+                let rxFreq = h.deviceState.freqRx > 100 ? h.deviceState.freqRx : 146.520
+                sendDesiredState(freq: rxFreq, squelch: 0)
+                log(String(format: "→ auto DesiredState %.4f MHz (RX audio open)", rxFreq))
+            }
+        case 0x07:
+            audioFrameCount += 1
+            let frameData = Data(body)
+            Task { await audio.feedOpusFrame(frameData) }
+        case 0x09:
+            break
+        case 0x0B:
+            if let ds = parseDeviceState(Data(body)) { deviceState = ds }
+        case 0x01, 0x02, 0x03:
+            if let s = String(bytes: body, encoding: .utf8) { log("← DBG: \(s)") }
+        default:
+            break
+        }
+    }
+
+    private func writeRaw(_ data: Data) {
+        guard let p = peripheral, let char = rxChar else { return }
+        let mtu    = p.maximumWriteValueLength(for: .withoutResponse)
+        var offset = 0
+        while offset < data.count {
+            let end   = min(offset + mtu, data.count)
+            p.writeValue(Data(data[offset..<end]), for: char, type: .withoutResponse)
+            offset = end
+        }
+    }
+
+    private func log(_ msg: String) {
+        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        logEntries.insert("[\(ts)] \(msg)", at: 0)
+        if logEntries.count > 100 { logEntries.removeLast() }
+    }
+}
