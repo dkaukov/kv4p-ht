@@ -69,21 +69,32 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
     }
 
-    func sendDesiredState(freq: Float, squelch: UInt8,
-                          ptt: Bool = false, txAllowed: Bool = false, highPower: Bool = false) {
+    func sendDesiredState(freqTx: Float, freqRx: Float, squelch: UInt8,
+                          ptt: Bool = false, txAllowed: Bool = false, highPower: Bool = false,
+                          bw: UInt8 = 0, ctcssTx: UInt8 = 0, ctcssRx: UInt8 = 0,
+                          filterPre: Bool = false, filterHigh: Bool = false, filterLow: Bool = false) {
         var flags: UInt16 = HOST_STATE_RADIO_CONFIG_VALID
                           | HOST_STATE_RSSI_ENABLED
                           | HOST_STATE_RX_AUDIO_OPEN
                           | HOST_STATE_ENABLE_STATUS_REPORTS
-        if highPower { flags |= HOST_STATE_HIGH_POWER }
-        if ptt       { flags |= HOST_STATE_PTT_REQUESTED }
-        if txAllowed { flags |= HOST_STATE_TX_ALLOWED }
+        if highPower  { flags |= HOST_STATE_HIGH_POWER }
+        if ptt        { flags |= HOST_STATE_PTT_REQUESTED }
+        if txAllowed  { flags |= HOST_STATE_TX_ALLOWED }
+        if filterPre  { flags |= HOST_STATE_FILTER_PRE }
+        if filterHigh { flags |= HOST_STATE_FILTER_HIGH }
+        if filterLow  { flags |= HOST_STATE_FILTER_LOW }
         seq += 1
-        let payload = buildDesiredState(sequence: seq, freq: freq, squelch: squelch, flags: flags)
+        let payload = buildDesiredState(sequence: seq, freqTx: freqTx, freqRx: freqRx,
+                                        squelch: squelch, flags: flags,
+                                        bw: bw, ctcssTx: ctcssTx, ctcssRx: ctcssRx)
         let frame   = buildKv4pVendorFrame(command: 0x0D, payload: payload)
         writeRaw(frame)
-        log(String(format: "→ DesiredState %.4f MHz sq=%d ptt=%d hp=%d",
-                   freq, squelch, ptt ? 1 : 0, highPower ? 1 : 0))
+        log(String(format: "→ DesiredState TX=%.4f RX=%.4f MHz sq=%d ptt=%d hp=%d",
+                   freqTx, freqRx, squelch, ptt ? 1 : 0, highPower ? 1 : 0))
+    }
+
+    func setAudioSampleHook(_ handler: @escaping ([Float], Int) -> Void) {
+        audio.onDecodedSamples = handler
     }
 
     // MARK: – CBCentralManagerDelegate
@@ -222,13 +233,13 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 // ESP32 won't stream audio until it receives DesiredState with RX_AUDIO_OPEN.
                 // Use freq from HELLO deviceState; clamp to sane range as a sanity check.
                 let rxFreq = h.deviceState.freqRx > 100 ? h.deviceState.freqRx : 146.520
-                sendDesiredState(freq: rxFreq, squelch: 0)
+                let txFreq = h.deviceState.freqTx > 100 ? h.deviceState.freqTx : rxFreq
+                sendDesiredState(freqTx: txFreq, freqRx: rxFreq, squelch: 0)
                 log(String(format: "→ auto DesiredState %.4f MHz (RX audio open)", rxFreq))
             }
         case 0x07:
             audioFrameCount += 1
-            let frameData = Data(body)
-            Task { await audio.feedOpusFrame(frameData) }
+            audio.feedAdpcmFrame(Data(body))
         case 0x09:
             break
         case 0x0B:
