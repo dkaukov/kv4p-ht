@@ -7,3 +7,6 @@ backups/
 *.lck
 *.swp
 .idea
+.DS_Store
+xcuserdata/
+*.xcuserstate
