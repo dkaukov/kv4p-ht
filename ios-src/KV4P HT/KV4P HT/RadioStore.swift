@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CoreLocation
 
 // MARK: - Data Models
 
@@ -14,7 +15,7 @@ enum VoiceMode: String, CaseIterable {
     }
 }
 
-struct Memory: Identifiable {
+struct Memory: Identifiable, Codable {
     let id = UUID()
     var name: String
     var group: String
@@ -110,14 +111,30 @@ class RadioStore {
     // ── BLE
     let ble = BLEManager()
 
+    // ── Location
+    let locationManager = LocationManager()
+    var repeaterFetchState: RepeaterFetchState = .idle
+    var repeaterSearchDistance: Int = 25  // miles
+    var repeaterSearchBand: Int = 4      // 4=2m, 16=70cm
+
     // ── Voice
     var voiceMode: VoiceMode = .simplex
+    var squelch: UInt8 = 3
     var captionsEnabled: Bool = false
     var isRecording: Bool = false
-    var activeScanIndex: Int = 1  // index in scanChannels currently active
+    var isScanning: Bool = false
+    var scanIndex: Int = 0
+    var scanPaused: Bool = false
+    @ObservationIgnored private var scanTimer: Timer?
 
     // ── Memories / Repeaters
-    var memories: [Memory] = []
+    private static let memoriesKey = "savedMemories"
+    private var isInitializing = true
+    var memories: [Memory] = [] {
+        didSet {
+            if !isInitializing { saveMemories() }
+        }
+    }
     var repeaters: [Repeater] = []
     var activeRepeaterId: UUID? = nil
 
@@ -131,6 +148,8 @@ class RadioStore {
 
     // ── Captions
     var captionLines: [CaptionLine] = []
+    let speechManager = SpeechManager()
+    @ObservationIgnored private var wasSquelched = true
 
     // ── Settings
     var callsign: String = ""
@@ -142,23 +161,83 @@ class RadioStore {
     var liveCaptions: Bool = true
     var saveTranscripts: Bool = true
     var stickyPTT: Bool = false
+    var bandwidth: UInt8 = 0  // 0=wide 25kHz, 1=narrow 12.5kHz
     var reduceMotion: Bool = false
     var captionLanguage: String = "English (US)"
+
+    // ── Init
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.memoriesKey),
+           let decoded = try? JSONDecoder().decode([Memory].self, from: data) {
+            memories = decoded
+        } else {
+            memories = [
+                Memory(name: "Simplex", group: "Calling", freq: 146.52,
+                       offset: 0, plTone: 0, squelch: 2,
+                       isRepeater: false, notes: "National calling frequency")
+            ]
+        }
+        isInitializing = false
+        configureSpeechManager()
+    }
+
+    private func configureSpeechManager() {
+        speechManager.configure(language: captionLanguage)
+
+        speechManager.onPartialResult = { [weak self] text in
+            guard let self else { return }
+            if let idx = self.captionLines.lastIndex(where: { $0.active }) {
+                self.captionLines[idx].text = text
+            }
+        }
+
+        speechManager.onSegmentFinalized = { [weak self] in
+            guard let self else { return }
+            for i in self.captionLines.indices where self.captionLines[i].active {
+                self.captionLines[i].active = false
+            }
+            self.captionLines.removeAll { $0.text.isEmpty && !$0.active }
+            if self.captionLines.count > 100 {
+                self.captionLines.removeFirst(self.captionLines.count - 100)
+            }
+        }
+
+        speechManager.onRollingRestart = { [weak self] in
+            self?.appendNewCaptionLine()
+        }
+    }
+
+    private func appendNewCaptionLine() {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        captionLines.append(CaptionLine(
+            callsign: "RX",
+            time: formatter.string(from: Date()),
+            text: "",
+            active: true
+        ))
+    }
 
     // ── Derived helpers
     var isHighPower: Bool { txPower != "1 W" }
 
+    var currentFreq: Float {
+        ble.deviceState?.freqRx ?? 146.52
+    }
+
     var currentFreqString: String {
-        if let ds = ble.deviceState {
-            return String(format: "%.3f", ds.freqRx)
-        }
-        return "146.520"
+        String(format: "%.3f", currentFreq)
     }
 
     var signalLevel: Int {
-        guard let ds = ble.deviceState else { return 0 }
-        // RSSI 0-255 → 0-9 bars
-        return min(9, Int(ds.rssi) / 28)
+        guard let ds = ble.deviceState, ds.rssi > 0 else { return 0 }
+        let result = 9.73 * log(0.0297 * Double(ds.rssi)) - 1.88
+        return max(1, min(9, Int(result.rounded())))
+    }
+
+    var rawRSSI: UInt8 {
+        ble.deviceState?.rssi ?? 0
     }
 
     var rxMode: RadioRxState {
@@ -167,6 +246,208 @@ class RadioStore {
         case 0: return .tx
         case 1: return .rx
         default: return .idle
+        }
+    }
+
+    func memory(for freq: Float) -> Memory? {
+        memories.first { abs($0.freq - freq) < 0.001 }
+    }
+
+    var activeMemoryId: UUID? {
+        memory(for: currentFreq)?.id
+    }
+
+    var isSquelched: Bool {
+        guard let ds = ble.deviceState else { return true }
+        return (ds.flags & DEVICE_STATE_SQUELCHED) != 0
+    }
+
+    func checkSquelchTransition() {
+        let sq = isSquelched
+        defer { wasSquelched = sq }
+        guard liveCaptions else { return }
+
+        if wasSquelched && !sq {
+            appendNewCaptionLine()
+            speechManager.startSegment()
+        } else if !wasSquelched && sq {
+            speechManager.endSegment()
+        }
+    }
+
+    func setupAudioSampleHook() {
+        ble.setAudioSampleHook { [weak self] samples, count in
+            guard let self, self.liveCaptions else { return }
+            self.speechManager.feedSamples(samples, count: count)
+        }
+    }
+
+    func startScan() {
+        guard !memories.isEmpty else { return }
+        isScanning = true
+        scanPaused = false
+        scanIndex = 0
+        tuneToScanIndex()
+        scheduleScanTick()
+    }
+
+    func stopScan() {
+        isScanning = false
+        scanPaused = false
+        scanTimer?.invalidate()
+        scanTimer = nil
+    }
+
+    private func scheduleScanTick() {
+        scanTimer?.invalidate()
+        scanTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { self?.scanTick() }
+        }
+    }
+
+    private func scanTick() {
+        guard isScanning, !memories.isEmpty else { return }
+
+        if !isSquelched {
+            scanPaused = true
+            return
+        }
+
+        if scanPaused {
+            scanPaused = false
+        }
+
+        scanIndex = (scanIndex + 1) % memories.count
+        tuneToScanIndex()
+    }
+
+    private func tuneToScanIndex() {
+        guard scanIndex < memories.count else { return }
+        let mem = memories[scanIndex]
+        sendRadioState(freq: mem.freq, ptt: false, txAllowed: false)
+    }
+
+    func sendRadioState(freq: Float? = nil, ptt: Bool = false, txAllowed: Bool = true) {
+        let rxFreq = freq ?? currentFreq
+        let mem = memory(for: rxFreq)
+        let txFreq = mem.map { rxFreq + $0.offset } ?? rxFreq
+        let tone = mem.map { ctcssIndex(for: $0.plTone) } ?? 0
+        ble.sendDesiredState(
+            freqTx: txFreq, freqRx: rxFreq, squelch: squelch,
+            ptt: ptt, txAllowed: txAllowed, highPower: isHighPower,
+            bw: bandwidth, ctcssTx: tone, ctcssRx: 0,
+            filterPre: filterPreemphasis, filterHigh: filterHighPass, filterLow: filterLowPass
+        )
+    }
+
+    // MARK: - RepeaterBook
+
+    func fetchNearbyRepeaters() {
+        guard let loc = locationManager.location else {
+            locationManager.requestLocation()
+            return
+        }
+        repeaterFetchState = .loading
+        let lat = loc.coordinate.latitude
+        let lon = loc.coordinate.longitude
+        let dist = repeaterSearchDistance
+        let band = repeaterSearchBand
+        let urlStr = "https://www.repeaterbook.com/repeaters/prox_result.php?city=&lat=\(lat)&long=\(lon)&distance=\(dist)&Dunit=m&band%5B%5D=\(band)&features%5B%5D=FM&use%5B%5D=OPEN&status_id=1"
+
+        Task {
+            do {
+                let repeaters = try await fetchRepeaterBookHTML(urlStr)
+                await MainActor.run {
+                    self.repeaters = repeaters
+                    self.repeaterFetchState = repeaters.isEmpty ? .empty : .loaded
+                }
+            } catch {
+                await MainActor.run {
+                    self.repeaterFetchState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    nonisolated private func fetchRepeaterBookHTML(_ urlString: String) async throws -> [Repeater] {
+        guard let url = URL(string: urlString) else { return [] }
+        var request = URLRequest(url: url)
+        request.setValue("KV4P-HT/1.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let html = String(data: data, encoding: .utf8) else { return [] }
+        return parseRepeaterBookHTML(html)
+    }
+
+    nonisolated private func parseRepeaterBookHTML(_ html: String) -> [Repeater] {
+        var results: [Repeater] = []
+        let rowPattern = try! NSRegularExpression(pattern: "<tr[^>]*>(.*?)</tr>", options: .dotMatchesLineSeparators)
+        let cellPattern = try! NSRegularExpression(pattern: "<td[^>]*>(.*?)</td>", options: .dotMatchesLineSeparators)
+        let tagPattern = try! NSRegularExpression(pattern: "<[^>]+>", options: [])
+
+        let rowMatches = rowPattern.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for rowMatch in rowMatches {
+            guard let rowRange = Range(rowMatch.range(at: 1), in: html) else { continue }
+            let rowHTML = String(html[rowRange])
+            let cellMatches = cellPattern.matches(in: rowHTML, range: NSRange(rowHTML.startIndex..., in: rowHTML))
+            guard cellMatches.count >= 10 else { continue }
+
+            func cellText(_ idx: Int) -> String {
+                guard idx < cellMatches.count,
+                      let r = Range(cellMatches[idx].range(at: 1), in: rowHTML) else { return "" }
+                let raw = String(rowHTML[r])
+                return tagPattern.stringByReplacingMatches(in: raw, range: NSRange(raw.startIndex..., in: raw), withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            guard let freq = Float(cellText(1)) else { continue }
+
+            let offsetStr = cellText(2).replacingOccurrences(of: " MHz", with: "")
+            let offset = Float(offsetStr) ?? 0
+            let toneStr = cellText(3)
+            let tone = Float(toneStr) ?? 0
+            let callsign = cellText(4)
+            let city = cellText(5)
+            let state = cellText(6)
+            let location = state.isEmpty ? city : "\(city), \(state)"
+            let miles = Float(cellText(9)) ?? 0
+
+            results.append(Repeater(
+                name: "\(callsign) · \(city)",
+                callsign: callsign,
+                freq: freq,
+                offset: offset,
+                plTone: tone,
+                distanceMi: miles,
+                location: location
+            ))
+        }
+        return results
+    }
+
+    func importRepeater(_ rep: Repeater, group: String) {
+        let mem = Memory(
+            name: rep.name,
+            group: group,
+            freq: rep.freq,
+            offset: rep.offset,
+            plTone: rep.plTone,
+            squelch: 2,
+            isRepeater: rep.offset != 0
+        )
+        memories.append(mem)
+    }
+
+    func importAllRepeaters(group: String) {
+        for rep in repeaters {
+            importRepeater(rep, group: group)
+        }
+    }
+
+    private func saveMemories() {
+        let mems = memories
+        DispatchQueue.global(qos: .background).async {
+            guard let data = try? JSONEncoder().encode(mems) else { return }
+            UserDefaults.standard.set(data, forKey: Self.memoriesKey)
         }
     }
 }
@@ -180,6 +461,11 @@ enum RadioRxState {
         case .tx:   return "TRANSMIT"
         }
     }
+}
+
+enum RepeaterFetchState: Equatable {
+    case idle, loading, loaded, empty
+    case error(String)
 }
 
 // PTT is sent via ble.sendDesiredState(freq:squelch:ptt:txAllowed:)

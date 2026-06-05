@@ -1,4 +1,5 @@
 import SwiftUI
+import MediaPlayer
 
 // MARK: - Typography helpers
 
@@ -71,35 +72,6 @@ struct BattGlyph: View {
     }
 }
 
-// MARK: - Segmented control
-
-struct KVSegmented: View {
-    @Environment(\.theme) var t
-    var options: [String]
-    @Binding var value: String
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(options, id: \.self) { opt in
-                let on = opt == value
-                Button(opt) { value = opt }
-                    .font(.system(size: 13.5, weight: on ? .semibold : .medium))
-                    .foregroundStyle(on ? t.label : t.label2)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(on ? (t.isDark ? t.surface2 : .white) : .clear)
-                            .shadow(color: on ? Color.black.opacity(0.18) : .clear, radius: 2, y: 1)
-                    )
-            }
-        }
-        .padding(2)
-        .background(t.fill)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
 // MARK: - S-Meter
 
 struct SMeter: View {
@@ -107,6 +79,8 @@ struct SMeter: View {
     var level: Int     // 0-9
     var max: Int = 9
     var active: Bool = true
+    var rawRSSI: UInt8 = 0
+    @State private var showRSSI = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 3) {
@@ -119,8 +93,17 @@ struct SMeter: View {
                     .frame(width: 6, height: h)
                     .animation(.easeOut(duration: 0.15), value: on)
             }
+            if showRSSI {
+                Text("RSSI \(rawRSSI)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(t.label2)
+                    .transition(.opacity)
+            }
         }
         .frame(height: 26)
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) { showRSSI.toggle() }
+        }
     }
 }
 
@@ -418,54 +401,16 @@ struct WaveformView: View {
     }
 }
 
-// MARK: - NavHeader
+// MARK: - Environment key: persistent MPVolumeView
 
-struct NavHeader: View {
-    @Environment(\.theme) var t
-    var title: String
-    var subtitle: String? = nil
-    var large: Bool = true
-    var leftContent: (any View)? = nil
-    var rightContent: (any View)? = nil
+private struct MPVolumeViewKey: EnvironmentKey {
+    static let defaultValue: MPVolumeView? = nil
+}
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                if let l = leftContent {
-                    AnyView(l)
-                } else if !large {
-                    Spacer()
-                }
-                if !large {
-                    Text(title)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(t.label)
-                }
-                Spacer()
-                if let r = rightContent { AnyView(r) }
-            }
-            .frame(minHeight: 34)
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
-
-            if large {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(t.label)
-                    if let sub = subtitle {
-                        Text(sub)
-                            .font(.system(size: 14))
-                            .foregroundStyle(t.label2)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-            } else {
-                Color.clear.frame(height: 8)
-            }
-        }
+extension EnvironmentValues {
+    var mpVolumeView: MPVolumeView? {
+        get { self[MPVolumeViewKey.self] }
+        set { self[MPVolumeViewKey.self] = newValue }
     }
 }
 

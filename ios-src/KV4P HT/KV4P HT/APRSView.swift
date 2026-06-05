@@ -6,73 +6,78 @@ struct APRSView: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
     @State private var selectedPacket: APRSPacket? = nil
+    @State private var searchText = ""
 
     private let filters = ["All", "Messages", "Bulletins", "Weather"]
 
     private var filteredPackets: [APRSPacket] {
+        var packets: [APRSPacket]
         switch store.aprsFilter {
-        case "Messages":  return store.aprsPackets.filter { $0.kind == .message }
-        case "Bulletins": return store.aprsPackets.filter { $0.kind == .bulletin }
-        case "Weather":   return store.aprsPackets.filter { $0.kind == .weather }
-        default:          return store.aprsPackets
+        case "Messages":  packets = store.aprsPackets.filter { $0.kind == .message }
+        case "Bulletins": packets = store.aprsPackets.filter { $0.kind == .bulletin }
+        case "Weather":   packets = store.aprsPackets.filter { $0.kind == .weather }
+        default:          packets = store.aprsPackets
+        }
+        guard !searchText.isEmpty else { return packets }
+        let q = searchText.lowercased()
+        return packets.filter {
+            $0.callsign.lowercased().contains(q) ||
+            $0.text.lowercased().contains(q)
         }
     }
 
     var body: some View {
-        ZStack {
-            t.bg.ignoresSafeArea()
-            VStack(spacing: 0) {
-                NavHeader(
-                    title: "APRS",
-                    subtitle: "144.390 · 1200 baud · \(store.aprsPackets.count) stations heard",
-                    rightContent: HStack(spacing: 8) {
-                        HeaderIconBtn(systemImage: "magnifyingglass")
-                        HeaderIconBtn(systemImage: "gearshape.fill")
-                    } as (any View)
-                )
-
-                // Filter chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(filters, id: \.self) { f in
-                            let on = f == store.aprsFilter
-                            Button(f) { store.aprsFilter = f }
-                                .font(.system(size: 13.5, weight: .semibold))
-                                .foregroundStyle(on ? .white : t.label)
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 6)
-                                .background(on ? t.accent : t.fill)
-                                .clipShape(RoundedRectangle(cornerRadius: 9))
-                        }
+        VStack(spacing: 0) {
+            // Filter chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(filters, id: \.self) { f in
+                        let on = f == store.aprsFilter
+                        Button(f) { store.aprsFilter = f }
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(on ? .white : t.label)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 6)
+                            .background(on ? t.accent : t.fill)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
                     }
-                    .padding(.horizontal, 16)
                 }
-                .padding(.bottom, 10)
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 10)
 
-                // Packet list
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(filteredPackets.enumerated()), id: \.element.id) { idx, packet in
-                            Button {
-                                selectedPacket = packet
-                            } label: {
-                                APRSRow(packet: packet, isLast: idx == filteredPackets.count - 1)
-                            }
-                            .buttonStyle(.plain)
+            // Packet list
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(filteredPackets.enumerated()), id: \.element.id) { idx, packet in
+                        Button {
+                            selectedPacket = packet
+                        } label: {
+                            APRSRow(packet: packet, isLast: idx == filteredPackets.count - 1)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .background(t.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
                 }
+                .background(t.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
+        }
+                .background(t.bg.ignoresSafeArea())
+        .searchable(text: $searchText, prompt: "Callsign or message text")
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                HeaderIconBtn(systemImage: "gearshape.fill")
             }
         }
         .sheet(item: $selectedPacket) { packet in
-            APRSDetailView(packet: packet)
-                .environment(\.theme, store.theme)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+            NavigationStack {
+                APRSDetailView(packet: packet)
+            }
+            .environment(\.theme, store.theme)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 }
@@ -166,93 +171,66 @@ struct APRSDetailView: View {
     @Environment(\.dismiss) var dismiss
     var packet: APRSPacket
 
-    private let packets: [(time: String, text: String, kind: String)] = [
-        ("7:42", "Heading to the hamfest, anyone need a ride from the north side?", "Message"),
-        ("7:36", "!3559.82N/07856.40W>  12 mph course 045", "Position"),
-        ("7:21", "On the air, monitoring 146.520", "Status"),
-    ]
-
     var body: some View {
-        ZStack {
-            t.bg.ignoresSafeArea()
-            VStack(spacing: 0) {
-                // Nav
-                HStack {
-                    Button(action: { dismiss() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("APRS")
-                                .font(.system(size: 17))
-                        }
-                        .foregroundStyle(t.accent)
-                    }
-                    Spacer()
-                    HeaderIconBtn(systemImage: "map")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+        VStack(spacing: 0) {
+            // Station header
+            VStack(spacing: 4) {
+                Circle()
+                    .fill(t.accent.opacity(0.13))
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Image(systemName: "message")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(t.accent)
+                    )
+                Text(packet.callsign)
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(t.label)
+                Text("Last heard \(packet.time) · \(String(format: "%.1f", packet.distanceMi)) mi")
+                    .font(.system(size: 14))
+                    .foregroundStyle(t.label2)
+            }
+            .padding(.bottom, 16)
 
-                // Station header
+            // Packet list
+            ScrollView {
                 VStack(spacing: 4) {
-                    Circle()
-                        .fill(t.accent.opacity(0.13))
-                        .frame(width: 60, height: 60)
-                        .overlay(
-                            Image(systemName: "message")
-                                .font(.system(size: 26, weight: .medium))
-                                .foregroundStyle(t.accent)
-                        )
-                    Text(packet.callsign)
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(t.label)
-                    Text("Last heard \(packet.time) · \(String(format: "%.1f", packet.distanceMi)) mi NE · via W4DW")
-                        .font(.system(size: 14))
+                    ListGroupView(header: "Message") {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(packet.kind.label)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(t.accent)
+                                Spacer()
+                                Text(packet.time)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(t.label2)
+                            }
+                            Text(packet.text)
+                                .font(.system(size: 14.5))
+                                .lineSpacing(3)
+                                .foregroundStyle(t.label)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                    }
+
+                    Text("Receive-only in this build. Outbound APRS messaging is planned for a future release.")
+                        .font(.system(size: 12.5))
                         .foregroundStyle(t.label2)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
                 }
                 .padding(.bottom, 16)
-
-                // Packet list
-                ScrollView {
-                    VStack(spacing: 4) {
-                        ListGroupView(header: "Recent packets") {
-                            ForEach(Array(packets.enumerated()), id: \.offset) { idx, p in
-                                VStack(alignment: .leading, spacing: 0) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack {
-                                            Text(p.kind)
-                                                .font(.system(size: 12, weight: .semibold))
-                                                .foregroundStyle(t.accent)
-                                            Spacer()
-                                            Text(p.time)
-                                                .font(.system(size: 12))
-                                                .foregroundStyle(t.label2)
-                                        }
-                                        Text(p.text)
-                                            .font(p.kind == "Position"
-                                                  ? .system(size: 14.5, design: .monospaced)
-                                                  : .system(size: 14.5))
-                                            .lineSpacing(3)
-                                            .foregroundStyle(t.label)
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 11)
-                                    if idx < packets.count - 1 {
-                                        Divider().padding(.leading, 16).background(t.sep)
-                                    }
-                                }
-                            }
-                        }
-
-                        Text("Receive-only in this build. Outbound APRS messaging is planned for a future release.")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(t.label2)
-                            .lineSpacing(3)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                    }
-                    .padding(.bottom, 16)
-                }
+            }
+        }
+                .background(t.bg.ignoresSafeArea())
+        .navigationTitle(packet.callsign)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HeaderIconBtn(systemImage: "map")
             }
         }
     }
