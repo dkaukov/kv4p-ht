@@ -16,8 +16,31 @@ let HOST_STATE_PTT_REQUESTED:         UInt16 = 1 << 1
 let HOST_STATE_RX_AUDIO_OPEN:         UInt16 = 1 << 2
 let HOST_STATE_HIGH_POWER:            UInt16 = 1 << 3
 let HOST_STATE_RSSI_ENABLED:          UInt16 = 1 << 4
+let HOST_STATE_FILTER_PRE:            UInt16 = 1 << 5
+let HOST_STATE_FILTER_HIGH:           UInt16 = 1 << 6
+let HOST_STATE_FILTER_LOW:            UInt16 = 1 << 7
 let HOST_STATE_TX_ALLOWED:            UInt16 = 1 << 11
 let HOST_STATE_ENABLE_STATUS_REPORTS: UInt16 = 1 << 12
+
+// DeviceState-only flag bits (reported by firmware)
+let DEVICE_STATE_SQUELCHED:           UInt16 = 1 << 10
+
+// CTCSS tone table — SA818 module indices 1–38
+private let CTCSS_TONES: [Float] = [
+    67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5,
+    91.5, 94.8, 97.4, 100.0, 103.5, 107.2, 110.9, 114.8,
+    118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4,
+    156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 203.5,
+    210.7, 218.1, 225.7, 233.6, 241.8, 250.3
+]
+
+func ctcssIndex(for toneHz: Float) -> UInt8 {
+    guard toneHz > 0 else { return 0 }
+    if let idx = CTCSS_TONES.firstIndex(where: { abs($0 - toneHz) < 0.5 }) {
+        return UInt8(idx + 1)
+    }
+    return 0
+}
 
 struct HelloFrame {
     let firmwareVersion: UInt16
@@ -81,17 +104,18 @@ func buildKv4pVendorFrame(command: UInt8, payload: Data) -> Data {
 
 // Builds using byte-append so there are no alignment requirements on any field.
 // (storeBytes crashes in debug builds at unaligned offsets, e.g. Float at offset 11/15.)
-func buildDesiredState(sequence: UInt32, freq: Float, squelch: UInt8, flags: UInt16) -> Data {
+func buildDesiredState(sequence: UInt32, freqTx: Float, freqRx: Float, squelch: UInt8,
+                       flags: UInt16, bw: UInt8 = 0, ctcssTx: UInt8 = 0, ctcssRx: UInt8 = 0) -> Data {
     var data = Data()
     withUnsafeBytes(of: sequence.littleEndian)  { data.append(contentsOf: $0) }  // 0..3
     withUnsafeBytes(of: Int32(-1).littleEndian) { data.append(contentsOf: $0) }  // 4..7
     withUnsafeBytes(of: flags.littleEndian)     { data.append(contentsOf: $0) }  // 8..9
-    data.append(0)                                                                // 10  bw
-    withUnsafeBytes(of: freq)                   { data.append(contentsOf: $0) }  // 11..14 freqTx
-    withUnsafeBytes(of: freq)                   { data.append(contentsOf: $0) }  // 15..18 freqRx
-    data.append(0)                                                                // 19 ctcssTx
+    data.append(bw)                                                               // 10  bw
+    withUnsafeBytes(of: freqTx)                 { data.append(contentsOf: $0) }  // 11..14 freqTx
+    withUnsafeBytes(of: freqRx)                 { data.append(contentsOf: $0) }  // 15..18 freqRx
+    data.append(ctcssTx)                                                          // 19 ctcssTx
     data.append(squelch)                                                          // 20
-    data.append(0)                                                                // 21 ctcssRx
+    data.append(ctcssRx)                                                          // 21 ctcssRx
     return data  // 22 bytes total
 }
 

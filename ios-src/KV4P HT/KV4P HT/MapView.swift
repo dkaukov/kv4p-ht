@@ -10,29 +10,17 @@ struct APRSMapView: View {
         center: CLLocationCoordinate2D(latitude: 35.994, longitude: -78.898),
         span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3)
     )
-    @State private var selectedStation: MapStation? = nil
-
-    private let stations: [MapStation] = [
-        MapStation(callsign: "W4DW",     lat: 36.010, lon: -78.940, kind: .fixed,   color: "accent"),
-        MapStation(callsign: "WX4DUR",   lat: 36.020, lon: -78.860, kind: .weather, color: "green"),
-        MapStation(callsign: "KE4QXP-9", lat: 35.975, lon: -78.850, kind: .mobile,  color: "amber"),
-        MapStation(callsign: "KK4ABC",   lat: 36.008, lon: -78.930, kind: .fixed,   color: "accent"),
-        MapStation(callsign: "N4XYZ",    lat: 36.030, lon: -78.820, kind: .fixed,   color: "accent"),
-    ]
 
     var body: some View {
         ZStack {
-            // Map
-            Map(coordinateRegion: $region, annotationItems: stations) { station in
+            Map(coordinateRegion: $region, annotationItems: [MapStation]()) { station in
                 MapAnnotation(coordinate: station.coordinate) {
-                    StationPin(station: station, isSelected: selectedStation?.id == station.id)
+                    StationPin(station: station, isSelected: false)
                         .environment(\.theme, store.theme)
-                        .onTapGesture { selectedStation = station }
                 }
             }
             .ignoresSafeArea()
 
-            // Top overlay (title bar)
             VStack {
                 HStack {
                     HStack(spacing: 8) {
@@ -57,35 +45,16 @@ struct APRSMapView: View {
 
                 Spacer()
 
-                // Bottom sheet
-                if let station = selectedStation {
-                    BottomSheetCard(station: station, totalStations: stations.count, moving: 1)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else {
-                    // Summary bar
-                    HStack(spacing: 18) {
-                        StatTile(value: "\(stations.count)", label: "Stations")
-                        Divider().frame(height: 30)
-                        StatTile(value: "\(stations.count)", label: "Within 25mi")
-                        Divider().frame(height: 30)
-                        StatTile(value: "1", label: "Moving")
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(t.hairline, lineWidth: 0.5)
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                VStack(spacing: 8) {
+                    Image(systemName: "map")
+                        .font(.system(size: 28))
+                        .foregroundStyle(t.label2)
+                    Text("APRS position data coming soon")
+                        .font(.system(size: 15))
+                        .foregroundStyle(t.label2)
                 }
+                .padding(.bottom, 40)
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedStation?.id)
         }
         .environment(\.theme, store.theme)
     }
@@ -198,7 +167,7 @@ struct BottomSheetCard: View {
                     Text(station.callsign)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(t.label)
-                    Text("12 mph · NE · 3.2 mi · heard 7:42")
+                    Text(station.callsign)
                         .font(.system(size: 13))
                         .foregroundStyle(t.label2)
                 }

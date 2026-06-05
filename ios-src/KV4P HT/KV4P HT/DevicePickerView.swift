@@ -21,140 +21,136 @@ struct DevicePickerView: View {
     private var scanning: Bool { ble.bleState == .scanning }
 
     var body: some View {
-        ZStack {
-            t.bg.ignoresSafeArea()
-            VStack(spacing: 0) {
-                // Header
-                HStack {
-                    Button("Cancel") {
-                        ble.stopScan()
-                        dismiss()
-                    }
-                    .font(.system(size: 17))
-                    .foregroundStyle(t.accent)
-
-                    Spacer()
-
-                    Text("Add Radio")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(t.label)
-
-                    Spacer()
-
-                    Button {
-                        ble.stopScan()
-                        ble.startScan()
-                    } label: {
-                        if scanning {
-                            ProgressView()
-                                .tint(t.accent)
-                                .frame(width: 32, height: 32)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(t.accent)
-                                .frame(width: 32, height: 32)
-                        }
-                    }
-                    .disabled(ble.bleState == .connecting || ble.bleState == .connected)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button("Cancel") {
+                    ble.stopScan()
+                    dismiss()
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+                .font(.system(size: 17))
+                .foregroundStyle(t.accent)
 
-                // State banner
-                HStack(spacing: 10) {
-                    if scanning || ble.bleState == .connecting || ble.bleState == .connected {
-                        Circle()
-                            .fill(t.amber)
-                            .frame(width: 7, height: 7)
-                            .shadow(color: t.amber, radius: 3)
+                Spacer()
+
+                Text("Add Radio")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(t.label)
+
+                Spacer()
+
+                Button {
+                    ble.stopScan()
+                    ble.startScan()
+                } label: {
+                    if scanning {
+                        ProgressView()
+                            .tint(t.accent)
+                            .frame(width: 32, height: 32)
                     } else {
-                        Circle()
-                            .fill(t.label3)
-                            .frame(width: 7, height: 7)
-                    }
-                    Text(stateLabel)
-                        .font(.system(size: 14))
-                        .foregroundStyle(t.label2)
-                    Spacer()
-                    if !ble.discoveredDevices.isEmpty {
-                        Text("\(ble.discoveredDevices.count) found")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(t.label3)
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(t.accent)
+                            .frame(width: 32, height: 32)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+                .disabled(ble.bleState == .connecting || ble.bleState == .connected)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
 
-                if ble.bleUnavailable {
-                    BLEUnavailableView()
-                } else if ble.discoveredDevices.isEmpty && !scanning {
-                    // Empty state
-                    VStack(spacing: 12) {
-                        Spacer()
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 48, weight: .thin))
-                            .foregroundStyle(t.label3)
-                        Text("No radios found")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(t.label)
-                        Text("Make sure kv4p HT is powered on and within range.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(t.label2)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
-                        Button("Scan for Radios") {
-                            ble.startScan()
-                        }
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(t.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .padding(.horizontal, 40)
-                        .padding(.top, 8)
-                        Spacer()
-                    }
+            // State banner
+            HStack(spacing: 10) {
+                if scanning || ble.bleState == .connecting || ble.bleState == .connected {
+                    Circle()
+                        .fill(t.amber)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: t.amber, radius: 3)
                 } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(Array(ble.discoveredDevices.enumerated()), id: \.element.id) { idx, device in
-                                DeviceRow(
-                                    device: device,
-                                    isConnecting: ble.bleState == .connecting || ble.bleState == .connected,
-                                    isLast: idx == ble.discoveredDevices.count - 1
-                                ) {
-                                    ble.stopScan()
-                                    ble.connect(device)
-                                }
-                            }
-                        }
-                        .background(t.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                    }
+                    Circle()
+                        .fill(t.label3)
+                        .frame(width: 7, height: 7)
                 }
-
-                // Disconnect row (when already connected)
-                if ble.bleState == .ready || ble.bleState == .connected {
-                    Button {
-                        ble.disconnect()
-                    } label: {
-                        Text("Disconnect")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(t.red)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(t.redSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
+                Text(stateLabel)
+                    .font(.system(size: 14))
+                    .foregroundStyle(t.label2)
+                Spacer()
+                if !ble.discoveredDevices.isEmpty {
+                    Text("\(ble.discoveredDevices.count) found")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(t.label3)
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
+
+            if ble.bleUnavailable {
+                BLEUnavailableView()
+            } else if ble.discoveredDevices.isEmpty && !scanning {
+                // Empty state
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 48, weight: .thin))
+                        .foregroundStyle(t.label3)
+                    Text("No radios found")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(t.label)
+                    Text("Make sure kv4p HT is powered on and within range.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(t.label2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                    Button("Scan for Radios") {
+                        ble.startScan()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(t.accent)
+                    .controlSize(.large)
+                    .buttonBorderShape(.roundedRectangle(radius: 14))
+                    .padding(.horizontal, 40)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(ble.discoveredDevices.enumerated()), id: \.element.id) { idx, device in
+                            DeviceRow(
+                                device: device,
+                                isConnecting: ble.bleState == .connecting || ble.bleState == .connected,
+                                isLast: idx == ble.discoveredDevices.count - 1
+                            ) {
+                                ble.stopScan()
+                                ble.connect(device)
+                            }
+                        }
+                    }
+                    .background(t.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
+            }
+
+            // Disconnect row (when already connected)
+            if ble.bleState == .ready || ble.bleState == .connected {
+                Button {
+                    ble.disconnect()
+                } label: {
+                    Text("Disconnect")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(t.red)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(t.redSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
+            }
         }
+                .background(t.bg.ignoresSafeArea())
         .onAppear {
             if ble.bleState == .idle { ble.startScan() }
         }
@@ -235,6 +231,7 @@ private struct DeviceRow: View {
             }
             .buttonStyle(.plain)
             .disabled(isConnecting)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if !isLast {
                 Divider().padding(.leading, 70).background(t.sep)
