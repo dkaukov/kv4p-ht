@@ -2,8 +2,8 @@ import Foundation
 import CoreBluetooth
 
 private let NUS_SERVICE_UUID = CBUUID(string: "00000001-ba2a-46c9-ae49-01b0961f68bb")
-private let NUS_TX_CHAR_UUID = CBUUID(string: "00000002-ba2a-46c9-ae49-01b0961f68bb")
-private let NUS_RX_CHAR_UUID = CBUUID(string: "00000003-ba2a-46c9-ae49-01b0961f68bb")
+private let NUS_TX_CHAR_UUID = CBUUID(string: "00000003-ba2a-46c9-ae49-01b0961f68bb")
+private let NUS_RX_CHAR_UUID = CBUUID(string: "00000002-ba2a-46c9-ae49-01b0961f68bb")
 
 enum BLEState {
     case idle, scanning, connecting, connected, ready
@@ -237,7 +237,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 sendDesiredState(freqTx: txFreq, freqRx: rxFreq, squelch: 0)
                 log(String(format: "→ auto DesiredState %.4f MHz (RX audio open)", rxFreq))
             }
-        case 0x07:
+        case 0x0C:
             audioFrameCount += 1
             audio.feedAdpcmFrame(Data(body))
         case 0x09:
