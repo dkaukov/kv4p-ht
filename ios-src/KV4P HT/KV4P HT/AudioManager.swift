@@ -126,6 +126,9 @@ actor AudioManager {
     // Actor methods reset to false before engine starts / after engine stops.
     private let started: UnsafeMutablePointer<Bool>
     nonisolated(unsafe) private var playing = false
+    // Set when a background engine restart fails ('!pla' etc.) — retried on
+    // next foreground via recoverIfNeeded().
+    private var needsRestart = false
     // Pre-allocated decode buffer — avoids per-frame heap allocation in feedAdpcmFrame.
     nonisolated(unsafe) private var pcmDecodeBuf = [Float](repeating: 0, count: 249)
     // Notification observer tokens — removed on stop() or restart.
@@ -218,7 +221,7 @@ actor AudioManager {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default,
-                                       options: [.defaultToSpeaker, .allowBluetooth])
+                                       options: [.defaultToSpeaker, .allowBluetoothHFP])
             try session.setPreferredIOBufferDuration(0.010)
             try session.setActive(true)
             // Poke inputNode so iOS allocates mic hardware now. Without this,
@@ -228,6 +231,7 @@ actor AudioManager {
             started.pointee = false
             try engine.start()
             playing = true
+            needsRestart = false
             registerObservers()
         } catch {
             print("[AudioManager] start failed: \(error)")
@@ -236,6 +240,7 @@ actor AudioManager {
 
     func stop() {
         removeObservers()
+        needsRestart = false
         guard playing else { return }
         engine.stop()
         ringBuffer.clear()
@@ -328,7 +333,7 @@ actor AudioManager {
         micTapInstalled = true
     }
 
-    func stopMicCapture() {
+    func stopMicCapture() async {
         print("[AudioManager] stopMicCapture: tapInstalled=\(micTapInstalled) playing=\(playing) engineRunning=\(engine.isRunning)")
         if micTapInstalled {
             engine.inputNode.removeTap(onBus: 0)
@@ -344,12 +349,16 @@ actor AudioManager {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default,
-                                    options: [.defaultToSpeaker, .allowBluetooth])
-            try engine.start()
+                                    options: [.defaultToSpeaker, .allowBluetoothHFP])
             playing = true
-            print("[AudioManager] stopMicCapture: engine restarted OK, playing=true route=\(session.currentRoute.outputs.map { $0.portName })")
+            if await startEngineWithRetry() {
+                print("[AudioManager] stopMicCapture: engine restarted OK, playing=true route=\(session.currentRoute.outputs.map { $0.portName })")
+            } else {
+                print("[AudioManager] stopMicCapture: engine restart FAILED")
+                needsRestart = true
+            }
         } catch {
-            print("[AudioManager] stopMicCapture: engine restart FAILED: \(error)")
+            print("[AudioManager] stopMicCapture: setCategory FAILED: \(error)")
             playing = false
         }
     }
@@ -496,6 +505,20 @@ actor AudioManager {
                 Task { await self.handleInterruption(note) }
             }
         )
+
+        // Media server crash — session and engine state are invalid until
+        // fully reconfigured. Without this, a background reset kills audio
+        // permanently.
+        observations.append(
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.mediaServicesWereResetNotification,
+                object: AVAudioSession.sharedInstance(),
+                queue: nil
+            ) { [weak self] _ in
+                guard let self else { return }
+                Task { await self.handleMediaServicesReset() }
+            }
+        )
     }
 
     private func removeObservers() {
@@ -503,7 +526,41 @@ actor AudioManager {
         observations = []
     }
 
-    private func restartAfterConfigChange() {
+    // Activate the session and start the engine, retrying with backoff.
+    // Background restarts (after interruptions / route changes / BLE wakes)
+    // can fail transiently with '!pla' while another app holds the hardware.
+    @discardableResult
+    private func startEngineWithRetry(attempts: Int = 3) async -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        for attempt in 1...attempts {
+            do {
+                try session.setActive(true)
+                try engine.start()
+                return true
+            } catch {
+                print("[AudioManager] engine start attempt \(attempt)/\(attempts) failed: \(error)")
+                if attempt < attempts {
+                    try? await Task.sleep(nanoseconds: 250_000_000 << (attempt - 1))
+                }
+            }
+        }
+        return false
+    }
+
+    // Foreground recovery hook — retries a restart that failed while
+    // backgrounded (set via needsRestart) or an engine found dead.
+    func recoverIfNeeded() async {
+        guard playing, needsRestart || !engine.isRunning else { return }
+        needsRestart = false
+        if micTapInstalled { return }  // TX in flight; stopMicCapture restarts
+        ringBuffer.clear()
+        started.pointee = false
+        if await !startEngineWithRetry() {
+            needsRestart = true
+        }
+    }
+
+    private func restartAfterConfigChange() async {
         guard playing else { return }
         // During TX (tap installed), skip restart — the tap's format may
         // not match the new hardware config, causing -10868. stopMicCapture
@@ -514,33 +571,52 @@ actor AudioManager {
         }
         ringBuffer.clear()
         started.pointee = false
-        do {
-            try engine.start()
-        } catch {
-            print("[AudioManager] route-change restart failed: \(error)")
-            playing = false
+        if await !startEngineWithRetry() {
+            print("[AudioManager] route-change restart failed")
+            needsRestart = true
         }
     }
 
-    private func handleInterruption(_ note: Notification) {
+    private func handleMediaServicesReset() {
+        print("[AudioManager] media services reset — rebuilding session + engine")
+        playing = false
+        started.pointee = false
+        ringBuffer.clear()
+        start()
+    }
+
+    private func handleInterruption(_ note: Notification) async {
         guard let info = note.userInfo,
               let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue),
-              type == .ended,
-              playing else { return }
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
-        let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-        guard AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
-        else { return }
-
-        ringBuffer.clear()
-        started.pointee = false
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-            try engine.start()
-        } catch {
-            print("[AudioManager] interruption resume failed: \(error)")
-            playing = false
+        switch type {
+        case .began:
+            // iOS posts a synthetic .began (wasSuspended=true) when the app
+            // resumes from suspension — the session wasn't interrupted.
+            if (info[AVAudioSessionInterruptionWasSuspendedKey] as? Bool) == true { return }
+            // Real interruption: discard stale audio and re-arm the gate so
+            // .ended resumes cleanly. Keep playing=true so .ended fires resume.
+            ringBuffer.clear()
+            started.pointee = false
+        case .ended:
+            guard playing else { return }
+            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                .contains(.shouldResume)
+            if !shouldResume {
+                // Backgrounded resumes often omit .shouldResume — try anyway
+                // after a beat; recoverIfNeeded() catches it on foreground.
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            ringBuffer.clear()
+            started.pointee = false
+            if await !startEngineWithRetry() {
+                print("[AudioManager] interruption resume failed — deferring to foreground")
+                needsRestart = true
+            }
+        @unknown default:
+            break
         }
     }
 

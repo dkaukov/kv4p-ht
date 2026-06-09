@@ -282,6 +282,19 @@ class RadioStore {
         }
     }
 
+    // Backgrounding keeps audio + BLE running; only UI-side work pauses
+    // (speech recognition burns CPU and is unreliable in background).
+    func enterBackground() {
+        ble.setAudioSampleHook(nil)
+        speechManager.endSegment()
+        wasSquelched = true
+    }
+
+    func enterForeground() {
+        setupAudioSampleHook()
+        ble.recoverAudioIfNeeded()
+    }
+
     func startScan() {
         guard !memories.isEmpty else { return }
         isScanning = true

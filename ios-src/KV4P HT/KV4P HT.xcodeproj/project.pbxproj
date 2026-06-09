@@ -29,9 +29,22 @@
 		29C0986C2FC91C0E002DAC76 /* KV4P HTUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "KV4P HTUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		29C098AA2FC91C0E002DAC76 /* Exceptions for "KV4P HT" folder in "KV4P HT" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 29C098542FC91C0C002DAC76 /* KV4P HT */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		29C098572FC91C0C002DAC76 /* KV4P HT */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				29C098AA2FC91C0E002DAC76 /* Exceptions for "KV4P HT" folder in "KV4P HT" target */,
+			);
 			path = "KV4P HT";
 			sourceTree = "<group>";
 		};
@@ -400,6 +413,7 @@
 				DEVELOPMENT_TEAM = 6V4U9NPU8H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "KV4P HT/Info.plist";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "KV4P-HT uses Bluetooth to communicate with the radio.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "KV4P-HT uses your location to find nearby repeaters from RepeaterBook.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KV4P-HT uses the microphone to transmit voice audio over the radio.";
@@ -436,6 +450,7 @@
 				DEVELOPMENT_TEAM = 6V4U9NPU8H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "KV4P HT/Info.plist";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "KV4P-HT uses Bluetooth to communicate with the radio.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "KV4P-HT uses your location to find nearby repeaters from RepeaterBook.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KV4P-HT uses the microphone to transmit voice audio over the radio.";

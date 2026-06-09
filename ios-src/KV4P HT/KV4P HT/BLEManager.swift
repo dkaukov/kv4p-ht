@@ -43,6 +43,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     @ObservationIgnored private var pendingLogEntries: [String] = []
     @ObservationIgnored private var logFlushScheduled = false
     @ObservationIgnored private var transmitting = false
+    @ObservationIgnored private var userInitiatedDisconnect = false
 
     override init() {
         super.init()
@@ -69,6 +70,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func connect(_ device: DiscoveredDevice) {
         stopScan()
         onMain { self.bleState = .connecting }
+        userInitiatedDisconnect = false
         peripheral = device.peripheral
         peripheral?.delegate = self
         central.connect(device.peripheral)
@@ -76,7 +78,12 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func disconnect() {
+        userInitiatedDisconnect = true
         if let p = peripheral { central.cancelPeripheralConnection(p) }
+    }
+
+    func recoverAudioIfNeeded() {
+        Task { await audio.recoverIfNeeded() }
     }
 
     func sendDesiredState(freqTx: Float, freqRx: Float, squelch: UInt8,
@@ -198,8 +205,10 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        let shouldReconnect = !userInitiatedDisconnect
+        userInitiatedDisconnect = false
         onMain {
-            self.bleState = .idle
+            self.bleState = shouldReconnect ? .connecting : .idle
             self.hello = nil
             self.deviceState = nil
             self.audioPlaying = false
@@ -210,8 +219,24 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         audioFrameCount = 0
         transmitting = false
         parser.reset()
-        Task { await audio.stop() }
-        log("Disconnected")
+        Task { [weak self] in
+            guard let self else { return }
+            // stop() must finish before a reconnect's audio.start() —
+            // serialize through the actor, then queue the reconnect.
+            await self.audio.stop()
+            if shouldReconnect {
+                self.bleQueue.async {
+                    self.peripheral = peripheral
+                    peripheral.delegate = self
+                    // Pending connects never time out; with bluetooth-central
+                    // background mode iOS wakes us when the radio reappears.
+                    self.central.connect(peripheral)
+                    self.log("Reconnecting when radio reappears...")
+                }
+            }
+        }
+        log(error == nil ? "Disconnected"
+                         : "Disconnected unexpectedly: \(error!.localizedDescription)")
     }
 
     // MARK: – CBPeripheralDelegate

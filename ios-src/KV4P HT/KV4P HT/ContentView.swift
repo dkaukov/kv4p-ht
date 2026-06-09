@@ -16,6 +16,7 @@ private struct PersistentVolumeViewHost: UIViewRepresentable {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var store = RadioStore()
     @State private var selectedTab: Tab = .voice
     @State private var mpVolumeView = MPVolumeView(frame: .zero)
@@ -93,6 +94,15 @@ struct ContentView: View {
         .environment(\.mpVolumeView, mpVolumeView)
         .preferredColorScheme(theme.isDark ? .dark : .light)
         .tint(theme.accent)
+        .onChange(of: scenePhase) { _, phase in
+            // .inactive is ignored — it fires for Control Center, incoming
+            // calls, etc. Audio/BLE deliberately keep running in background.
+            switch phase {
+            case .background: store.enterBackground()
+            case .active:     store.enterForeground()
+            default:          break
+            }
+        }
         .overlay(alignment: .topLeading) {
             PersistentVolumeViewHost(volumeView: mpVolumeView)
                 .frame(width: 1, height: 1)
