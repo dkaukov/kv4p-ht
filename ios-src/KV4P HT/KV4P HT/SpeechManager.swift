@@ -92,7 +92,7 @@ class SpeechManager {
             withTimeInterval: Self.rollingRestartSeconds,
             repeats: false
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.rollingRestart()
             }
         }

@@ -378,7 +378,7 @@ struct RepeaterBrowserView: View {
                 }
 
                 HStack(spacing: 12) {
-                    (Text("Tap ") + Text(Image(systemName: "bolt.fill")) + Text(" to tune."))
+                    Text("Tap \(Image(systemName: "bolt.fill")) to tune.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(t.label2)
 

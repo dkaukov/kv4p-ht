@@ -1,5 +1,5 @@
 import Foundation
-import CoreBluetooth
+@preconcurrency import CoreBluetooth
 
 private let BLE_KISS_SERVICE_UUID = CBUUID(string: "00000001-ba2a-46c9-ae49-01b0961f68bb")
 private let BLE_KISS_TX_CHAR_UUID = CBUUID(string: "00000003-ba2a-46c9-ae49-01b0961f68bb")
@@ -225,14 +225,14 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             // serialize through the actor, then queue the reconnect.
             await self.audio.stop()
             if shouldReconnect {
-                self.bleQueue.async {
-                    self.peripheral = peripheral
-                    peripheral.delegate = self
-                    // Pending connects never time out; with bluetooth-central
-                    // background mode iOS wakes us when the radio reappears.
-                    self.central.connect(peripheral)
-                    self.log("Reconnecting when radio reappears...")
-                }
+                // CBCentralManager methods are thread-safe; callbacks still
+                // arrive on bleQueue. Pending connects never time out; with
+                // bluetooth-central background mode iOS wakes us when the
+                // radio reappears.
+                self.peripheral = peripheral
+                peripheral.delegate = self
+                self.central.connect(peripheral)
+                self.log("Reconnecting when radio reappears...")
             }
         }
         log(error == nil ? "Disconnected"

@@ -6,17 +6,19 @@ import MapKit
 struct APRSMapView: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
-    @State private var region = MKCoordinateRegion(
+    @State private var position: MapCameraPosition = .region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 35.994, longitude: -78.898),
         span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3)
-    )
+    ))
 
     var body: some View {
         ZStack {
-            Map(coordinateRegion: $region, annotationItems: [MapStation]()) { station in
-                MapAnnotation(coordinate: station.coordinate) {
-                    StationPin(station: station, isSelected: false)
-                        .environment(\.theme, store.theme)
+            Map(position: $position) {
+                ForEach([MapStation]()) { station in
+                    Annotation(station.callsign, coordinate: station.coordinate) {
+                        StationPin(station: station, isSelected: false)
+                            .environment(\.theme, store.theme)
+                    }
                 }
             }
             .ignoresSafeArea()

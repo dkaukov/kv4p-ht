@@ -16,7 +16,7 @@ enum VoiceMode: String, CaseIterable {
 }
 
 struct Memory: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var name: String
     var group: String
     var freq: Float

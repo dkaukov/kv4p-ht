@@ -6,7 +6,9 @@ import os
 // boosts holder to match waiter), so the RT render thread can block-acquire
 // without risk of unbounded priority inversion. Hold time is sub-microsecond
 // (bulk memcpy only).
-private final class PCMRingBuffer: @unchecked Sendable {
+// nonisolated: opts out of the project's MainActor default isolation — this
+// is lock-protected and called from the RT render thread and BLE queue.
+private nonisolated final class PCMRingBuffer: @unchecked Sendable {
     private var buf: [Float]
     private let cap: Int
     private var writeIdx = 0
@@ -37,9 +39,9 @@ private final class PCMRingBuffer: @unchecked Sendable {
 
         buf.withUnsafeMutableBufferPointer { bptr in
             let dst = bptr.baseAddress!
-            _ = (dst + pos).update(from: src, count: first)
+            (dst + pos).update(from: src, count: first)
             if first < n {
-                _ = dst.update(from: src + first, count: n - first)
+                dst.update(from: src + first, count: n - first)
             }
         }
         writeIdx += n
@@ -61,9 +63,9 @@ private final class PCMRingBuffer: @unchecked Sendable {
 
         buf.withUnsafeBufferPointer { bptr in
             let src = bptr.baseAddress!
-            _ = dst.update(from: src + rPos, count: first)
+            dst.update(from: src + rPos, count: first)
             if first < n {
-                _ = (dst + first).update(from: src, count: n - first)
+                (dst + first).update(from: src, count: n - first)
             }
         }
         for i in n..<frameCount { dst[i] = 0 }
@@ -327,7 +329,7 @@ actor AudioManager {
     // MARK: – TX Mic Capture
 
     func startMicCapture(handler: @escaping (Data) -> Void) async {
-        let granted = AVAudioSession.sharedInstance().recordPermission == .granted
+        let granted = AVAudioApplication.shared.recordPermission == .granted
         if !granted {
             AVAudioApplication.requestRecordPermission { [weak self] ok in
                 guard ok, let self else {
@@ -659,11 +661,10 @@ actor AudioManager {
 
         switch type {
         case .began:
-            // iOS posts a synthetic .began (wasSuspended=true) when the app
-            // resumes from suspension — the session wasn't interrupted.
-            if (info[AVAudioSessionInterruptionWasSuspendedKey] as? Bool) == true { return }
-            // Real interruption: discard stale audio and re-arm the gate so
-            // .ended resumes cleanly. Keep playing=true so .ended fires resume.
+            // (iOS 16+ no longer posts synthetic wasSuspended interruptions,
+            // so every .began here is real.)
+            // Discard stale audio and re-arm the gate so .ended resumes
+            // cleanly. Keep playing=true so .ended fires resume.
             ringBuffer.clear()
             started.pointee = false
         case .ended:
