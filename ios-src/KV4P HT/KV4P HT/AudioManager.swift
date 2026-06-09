@@ -118,8 +118,11 @@ actor AudioManager {
     ]
     private static let adpcmIndexTable: [Int8] = [-1, -1, -1, -1, 2, 4, 6, 8]
 
-    private let engine:     AVAudioEngine
-    private let sourceNode: AVAudioSourceNode
+    // Rebuilt on TX→RX transition: once inputNode is accessed, the engine's
+    // AU graph permanently enables input IO and can no longer start under
+    // the .playback category (input format reads 0 Hz).
+    private var engine:     AVAudioEngine
+    private var sourceNode: AVAudioSourceNode
     private let pcmFormat:  AVAudioFormat
     private let ringBuffer: PCMRingBuffer
     // RT-safe one-shot startup gate. Render thread is sole writer (sets true).
@@ -160,10 +163,23 @@ actor AudioManager {
                                 channels: 1,
                                 interleaved: false)!
         let rb  = PCMRingBuffer(capacity: Self.capacitySamples)
-        let eng = AVAudioEngine()
         let st  = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         st.initialize(to: false)
 
+        (engine, sourceNode) = Self.makeEngine(format: fmt, ringBuffer: rb, started: st)
+
+        pcmFormat  = fmt
+        ringBuffer = rb
+        started    = st
+        isAvailable = true
+    }
+
+    private static func makeEngine(format fmt: AVAudioFormat,
+                                   ringBuffer rb: PCMRingBuffer,
+                                   started st: UnsafeMutablePointer<Bool>)
+        -> (AVAudioEngine, AVAudioSourceNode)
+    {
+        let eng = AVAudioEngine()
         let threshold = Self.startThreshold
         let stopThr   = Self.stopThreshold
         let sn = AVAudioSourceNode(format: fmt) { _, _, frameCount, audioBufferList -> OSStatus in
@@ -207,26 +223,35 @@ actor AudioManager {
         sn.volume = 0.35
         eng.attach(sn)
         eng.connect(sn, to: eng.mainMixerNode, format: fmt)
+        return (eng, sn)
+    }
 
-        pcmFormat  = fmt
-        ringBuffer = rb
-        engine     = eng
-        sourceNode = sn
-        started    = st
-        isAvailable = true
+    // Discard an input-tainted engine and build a fresh output-only one.
+    private func rebuildEngine() {
+        engine.stop()
+        (engine, sourceNode) = Self.makeEngine(format: pcmFormat,
+                                               ringBuffer: ringBuffer,
+                                               started: started)
+    }
+
+    // RX: .playback only — no mic hardware, no orange indicator, A2DP output.
+    // TX: .playAndRecord — mic active, indicator on, HFP on Bluetooth.
+    private func configureSession(tx: Bool) throws {
+        let session = AVAudioSession.sharedInstance()
+        if tx {
+            try session.setCategory(.playAndRecord, mode: .default,
+                                    options: [.defaultToSpeaker, .allowBluetoothHFP])
+        } else {
+            try session.setCategory(.playback, mode: .default)
+        }
+        try session.setPreferredIOBufferDuration(0.010)
     }
 
     func start() {
         guard !playing else { return }
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default,
-                                       options: [.defaultToSpeaker, .allowBluetoothHFP])
-            try session.setPreferredIOBufferDuration(0.010)
-            try session.setActive(true)
-            // Poke inputNode so iOS allocates mic hardware now. Without this,
-            // inputNode.inputFormat returns 0 Hz and installTap fails later.
-            _ = engine.inputNode
+            try configureSession(tx: false)
+            try AVAudioSession.sharedInstance().setActive(true)
             ringBuffer.clear()
             started.pointee = false
             try engine.start()
@@ -301,7 +326,7 @@ actor AudioManager {
 
     // MARK: – TX Mic Capture
 
-    func startMicCapture(handler: @escaping (Data) -> Void) {
+    func startMicCapture(handler: @escaping (Data) -> Void) async {
         let granted = AVAudioSession.sharedInstance().recordPermission == .granted
         if !granted {
             AVAudioApplication.requestRecordPermission { [weak self] ok in
@@ -313,13 +338,22 @@ actor AudioManager {
             }
             return
         }
-        installMicTap(handler: handler)
+        await installMicTap(handler: handler)
     }
 
-    private func installMicTap(handler: @escaping (Data) -> Void) {
+    private func installMicTap(handler: @escaping (Data) -> Void) async {
         if micTapInstalled {
             engine.inputNode.removeTap(onBus: 0)
             micTapInstalled = false
+        }
+        engine.stop()
+        do {
+            try configureSession(tx: true)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("[AudioManager] installMicTap: TX session config failed: \(error)")
+            await fallBackToRxMode()
+            return
         }
         txFrameHandler = handler
         txEncState = (predictor: 0, stepIndex: 0)
@@ -327,10 +361,38 @@ actor AudioManager {
         txResamplePhase = 0
         txResampleRatio = 0 // sentinel — computed from first buffer
 
+        // First inputNode access in record category — allocates mic hardware
+        // (orange indicator turns on here) and gives a valid input format.
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             self?.processMicBuffer(buffer)
         }
         micTapInstalled = true
+        ringBuffer.clear()
+        started.pointee = false
+        if await !startEngineWithRetry() {
+            print("[AudioManager] installMicTap: engine start failed — reverting to RX")
+            engine.inputNode.removeTap(onBus: 0)
+            micTapInstalled = false
+            txFrameHandler = nil
+            await fallBackToRxMode()
+        }
+    }
+
+    // Rebuild the engine output-only and resume RX playback. Used when a TX
+    // transition fails partway — the engine may already be input-tainted.
+    private func fallBackToRxMode() async {
+        rebuildEngine()
+        do {
+            try configureSession(tx: false)
+        } catch {
+            print("[AudioManager] fallBackToRxMode: session config failed: \(error)")
+        }
+        registerObservers()
+        ringBuffer.clear()
+        started.pointee = false
+        if await !startEngineWithRetry() {
+            needsRestart = true
+        }
     }
 
     func stopMicCapture() async {
@@ -342,16 +404,19 @@ actor AudioManager {
         }
         txFrameHandler = nil
         txAccumCount = 0
-        engine.stop()
+        // Input-tainted engine can't start under .playback — build a fresh
+        // output-only engine (mic hardware released, indicator turns off).
+        rebuildEngine()
         ringBuffer.clear()
         started.pointee = false
-        print("[AudioManager] stopMicCapture: engine stopped, buffer cleared")
+        print("[AudioManager] stopMicCapture: engine rebuilt, buffer cleared")
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default,
-                                    options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try configureSession(tx: false)
             playing = true
+            // Config-change observer is bound to the old engine instance.
+            registerObservers()
             if await startEngineWithRetry() {
+                let session = AVAudioSession.sharedInstance()
                 print("[AudioManager] stopMicCapture: engine restarted OK, playing=true route=\(session.currentRoute.outputs.map { $0.portName })")
             } else {
                 print("[AudioManager] stopMicCapture: engine restart FAILED")
@@ -582,6 +647,8 @@ actor AudioManager {
         playing = false
         started.pointee = false
         ringBuffer.clear()
+        // Old engine references dead AU instances after a server crash.
+        rebuildEngine()
         start()
     }
 
