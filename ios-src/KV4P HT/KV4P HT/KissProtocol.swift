@@ -36,7 +36,7 @@ nonisolated let RADIO_STATUS_FOUND:     UInt8 = 0x66  // 'f'
 nonisolated let RADIO_STATUS_NOT_FOUND: UInt8 = 0x78  // 'x'
 
 // CTCSS tone table — SA818 module indices 1–38
-private nonisolated let CTCSS_TONES: [Float] = [
+nonisolated let CTCSS_TONES: [Float] = [
     67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5,
     91.5, 94.8, 97.4, 100.0, 103.5, 107.2, 110.9, 114.8,
     118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4,
@@ -50,6 +50,11 @@ nonisolated func ctcssIndex(for toneHz: Float) -> UInt8 {
         return UInt8(idx + 1)
     }
     return 0
+}
+
+nonisolated func ctcssToneHz(for index: UInt8) -> Float? {
+    guard index >= 1, Int(index) <= CTCSS_TONES.count else { return nil }
+    return CTCSS_TONES[Int(index) - 1]
 }
 
 nonisolated struct HelloFrame {

@@ -35,7 +35,7 @@ struct MemoriesView: View {
                             ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, mem in
                                 MemoryRow(memory: mem, channelNum: idx + 1, groupColor: t.accent, isLast: idx == group.items.count - 1, isActive: mem.id == store.activeMemoryId, onTap: {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    store.sendRadioState(freq: mem.freq)
+                                    store.applyMemory(mem)
                                 })
                                 .contextMenu {
                                     Button {

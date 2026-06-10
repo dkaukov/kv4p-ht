@@ -301,7 +301,7 @@ class APRSController {
         if let freq = beaconFreq, store.aprsBeaconFrequency != "Current" {
             // Frequency-switch beacon: tune, settle, send, wait out TX, restore.
             let originalFreq = store.currentFreq
-            store.sendRadioState(freq: freq)
+            store.sendRadioState(freq: freq, simplexOverride: true)
             try? await Task.sleep(for: .milliseconds(500))
             transmitPayload(payload)
             try? await Task.sleep(for: .seconds(4))

@@ -30,9 +30,8 @@ struct VoiceView: View {
             .padding(.bottom, 2)
 
             switch store.voiceMode {
-            case .simplex:  SimplexBody(store: store, showCaptions: $showCaptions)
-            case .repeater: RepeaterBody(store: store, showCaptions: $showCaptions)
-            case .scan:     ScanBody(store: store)
+            case .vfo:  VFOBody(store: store, showCaptions: $showCaptions)
+            case .scan: ScanBody(store: store)
             }
 
             Spacer(minLength: 0)
@@ -82,58 +81,26 @@ struct VoiceView: View {
     }
 }
 
-// MARK: - Simplex / Repeater body (shared radio stage)
+// MARK: - VFO body
 
-private struct SimplexBody: View {
+private struct VFOBody: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
     @Binding var showCaptions: Bool
 
-    private var channel: (name: String, desc: String, freq: String, offset: String, tone: String) {
+    var body: some View {
+        // Memory match supplies only name/description; freq, offset, and
+        // tone always display firmware-applied state.
         let matched = store.memory(for: store.currentFreq)
-        return (
-            name:   matched?.name ?? store.currentFreqString,
-            desc:   matched?.notes ?? "",
-            freq:   store.currentFreqString,
-            offset: matched?.offsetString ?? store.currentOffsetString,
-            tone:   matched?.toneString ?? "Off"
-        )
-    }
-
-    var body: some View {
         RadioStage(
             store:        store,
-            channelName:  channel.name,
-            channelDesc:  channel.desc,
-            freq:         channel.freq,
-            offset:       channel.offset,
-            tone:         channel.tone,
-            modeLabel:    "VHF · Simplex",
+            channelName:  matched?.name ?? store.currentFreqString,
+            channelDesc:  matched?.notes ?? "",
+            freq:         store.currentFreqString,
+            offset:       store.currentOffsetString,
+            tone:         store.currentToneString,
+            modeLabel:    "VHF · VFO",
             freqEditable: true,
-            showCaptions: $showCaptions
-        )
-    }
-}
-
-private struct RepeaterBody: View {
-    @Environment(\.theme) var t
-    @Bindable var store: RadioStore
-    @Binding var showCaptions: Bool
-
-    private var repeater: Repeater? {
-        store.repeaters.first
-    }
-
-    var body: some View {
-        let r = repeater
-        RadioStage(
-            store:        store,
-            channelName:  r?.name ?? "Repeater",
-            channelDesc:  r.map { "\($0.callsign) · \($0.location)" } ?? "",
-            freq:         r?.freqString ?? store.currentFreqString,
-            offset:       r?.offsetString ?? "−0.600",
-            tone:         r.map { "PL \(String(format: "%.1f", $0.plTone))" } ?? "Off",
-            modeLabel:    "VHF · Repeater",
             showCaptions: $showCaptions
         )
     }
@@ -156,6 +123,7 @@ private struct RadioStage: View {
     @GestureState private var pttDown = false
     @State private var stickyPttActive = false
     @State private var showNumpad = false
+    @State private var showOffsetTone = false
 
     // Applied state (firmware DeviceState) drives the badge, frequency color,
     // and S-meter; local request state only drives the PTT button visual.
@@ -221,11 +189,17 @@ private struct RadioStage: View {
             }
             .padding(.top, 8)
 
-            // Info pills
+            // Info pills — offset/tone open the channel-config editor
             HStack(spacing: 8) {
-                InfoPill(key: "Offset", value: offset)
-                InfoPill(key: "Tone",   value: tone)
-                InfoPill(key: "Power",  value: store.txPower)
+                Button { showOffsetTone = true } label: {
+                    InfoPill(key: "Offset", value: offset)
+                }
+                .buttonStyle(.plain)
+                Button { showOffsetTone = true } label: {
+                    InfoPill(key: "Tone", value: tone)
+                }
+                .buttonStyle(.plain)
+                InfoPill(key: "Power", value: store.txPower)
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -302,6 +276,156 @@ private struct RadioStage: View {
                 .environment(\.theme, store.theme)
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showOffsetTone) {
+            OffsetToneSheet(store: store)
+                .environment(\.theme, store.theme)
+                .presentationDetents([.height(440)])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// MARK: - Offset / Tone editor
+
+private struct OffsetToneSheet: View {
+    @Environment(\.theme) var t
+    @Environment(\.dismiss) var dismiss
+    @Bindable var store: RadioStore
+
+    private enum Direction: Int, CaseIterable {
+        case minus, simplex, plus
+        var label: String {
+            switch self {
+            case .minus:   return "−"
+            case .simplex: return "Simplex"
+            case .plus:    return "+"
+            }
+        }
+    }
+
+    @State private var direction: Direction
+    @State private var magnitudeText: String
+    @State private var toneIndex: Int
+
+    private static let presets: [Float] = [0.600, 5.000]
+
+    init(store: RadioStore) {
+        self.store = store
+        // Seed from desired VFO state, not applied — this sheet edits intent.
+        let off = store.vfoOffset
+        _direction = State(initialValue: abs(off) < 0.0005 ? .simplex : (off > 0 ? .plus : .minus))
+        _magnitudeText = State(initialValue: String(format: "%.3f", abs(off) < 0.0005 ? 0.600 : abs(off)))
+        _toneIndex = State(initialValue: Int(store.vfoToneIndex))
+    }
+
+    private var magnitude: Float {
+        Float(magnitudeText) ?? 0.600
+    }
+
+    private func apply() {
+        let offset: Float
+        switch direction {
+        case .simplex: offset = 0
+        case .plus:    offset = magnitude
+        case .minus:   offset = -magnitude
+        }
+        store.setVfoConfig(offset: offset, toneIndex: UInt8(toneIndex))
+        dismiss()
+    }
+
+    var body: some View {
+        ZStack {
+            t.bg.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Channel Config")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(t.label)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 22)
+                    .padding(.bottom, 18)
+
+                // Offset
+                Text("TX OFFSET")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(t.label2)
+                    .padding(.horizontal, 24)
+                Picker("Direction", selection: $direction) {
+                    ForEach(Direction.allCases, id: \.self) { d in
+                        Text(d.label).tag(d)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
+                if direction != .simplex {
+                    HStack(spacing: 8) {
+                        ForEach(Self.presets, id: \.self) { preset in
+                            Button {
+                                magnitudeText = String(format: "%.3f", preset)
+                            } label: {
+                                Text(String(format: "%.3f", preset))
+                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(magnitude == preset ? .white : t.label)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(magnitude == preset ? t.accent : t.surface)
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        TextField("MHz", text: $magnitudeText)
+                            .keyboardType(.decimalPad)
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(t.label)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(t.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                            .frame(width: 90)
+                        Text("MHz")
+                            .font(.system(size: 13))
+                            .foregroundStyle(t.label2)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                }
+
+                // Tone
+                Text("TX TONE (CTCSS)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(t.label2)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                Picker("Tone", selection: $toneIndex) {
+                    Text("Off").tag(0)
+                    ForEach(1...CTCSS_TONES.count, id: \.self) { idx in
+                        Text(String(format: "%.1f Hz", CTCSS_TONES[idx - 1])).tag(idx)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 110)
+                .clipped()
+                .padding(.horizontal, 20)
+
+                Spacer(minLength: 0)
+
+                Button(action: apply) {
+                    Text("APPLY")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(t.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, 12)
+            }
         }
     }
 }

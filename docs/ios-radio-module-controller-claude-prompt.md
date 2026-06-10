@@ -149,6 +149,25 @@ show TX or active RX just because the user requested it.
    from offset; offset is radio config, `voiceMode` is a UI workflow
    selection.
 
+## VFO Mode Consolidation (follow-on UX change)
+
+The Voice tab's Simplex/Repeater modes were collapsed into a single VFO mode
+(picker is now `VFO | Scan`). Rationale: on a real HT, repeater-vs-simplex is
+channel configuration (offset + tone), not a mode; the split also made
+simplex-with-offset homeless and let `sendRadioState` clobber the TX tone
+whenever no memory matched the tuned frequency.
+
+- `RadioStore` carries desired VFO channel config (`vfoOffset`,
+  `vfoToneIndex`), seeded from firmware-applied state on connect and by
+  `applyMemory(_:)` / `tune(toRepeater:)`. `sendRadioState` uses these fields
+  directly — no memory lookup, no forced tone 0, no collapse to simplex.
+- The Offset and Tone pills display applied state and open an editor sheet
+  that edits desired state via `setVfoConfig(offset:toneIndex:)`.
+- APRS frequency-switch beacons pass `simplexOverride: true` so beacon TX
+  ignores the VFO offset/tone without mutating them.
+- `voiceMode` remains a pure UI workflow selection (`vfo`/`scan`); offset is
+  radio config, per the PR #11 rule above.
+
 ## Constraints
 
 - Do not rewrite the UI.
