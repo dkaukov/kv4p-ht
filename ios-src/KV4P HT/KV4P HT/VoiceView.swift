@@ -163,6 +163,7 @@ private struct RadioStage: View {
                 if freqEditable {
                     Button { showNumpad = true } label: {
                         FreqReadout(freq: freq, state: rxState)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 } else {

@@ -228,6 +228,7 @@ private struct DeviceRow: View {
                 }
                 .padding(.horizontal, 16)
                 .frame(minHeight: 62)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isConnecting)
