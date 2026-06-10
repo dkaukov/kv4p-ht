@@ -197,6 +197,9 @@ struct ListRow: View {
                     .padding(.leading, leading != nil ? 56 : 16)
             }
         }
+        // Transparent regions (spacer, text gaps) must hit-test so rows
+        // wrapped in plain-style Buttons are tappable across the full width.
+        .contentShape(Rectangle())
     }
 }
 
