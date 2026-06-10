@@ -25,6 +25,7 @@ struct Memory: Identifiable, Codable {
     var squelch: UInt8
     var isRepeater: Bool
     var notes: String = ""
+    var scanEnabled: Bool = true
 
     var freqString: String { String(format: "%.3f", freq) }
     var offsetString: String {
@@ -37,6 +38,23 @@ struct Memory: Identifiable, Codable {
         return "Simplex · \(notes.isEmpty ? "Simplex" : notes)"
     }
 
+}
+
+extension Memory {
+    // Custom decode so memories saved before scanEnabled existed still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        group = try c.decode(String.self, forKey: .group)
+        freq = try c.decode(Float.self, forKey: .freq)
+        offset = try c.decode(Float.self, forKey: .offset)
+        plTone = try c.decode(Float.self, forKey: .plTone)
+        squelch = try c.decode(UInt8.self, forKey: .squelch)
+        isRepeater = try c.decode(Bool.self, forKey: .isRepeater)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        scanEnabled = try c.decodeIfPresent(Bool.self, forKey: .scanEnabled) ?? true
+    }
 }
 
 struct Repeater: Identifiable {
@@ -295,8 +313,10 @@ class RadioStore {
         ble.recoverAudioIfNeeded()
     }
 
+    var scanList: [Memory] { memories.filter(\.scanEnabled) }
+
     func startScan() {
-        guard !memories.isEmpty else { return }
+        guard !scanList.isEmpty else { return }
         isScanning = true
         scanPaused = false
         scanIndex = 0
@@ -319,7 +339,8 @@ class RadioStore {
     }
 
     private func scanTick() {
-        guard isScanning, !memories.isEmpty else { return }
+        let list = scanList
+        guard isScanning, !list.isEmpty else { return }
 
         if !isSquelched {
             scanPaused = true
@@ -330,14 +351,24 @@ class RadioStore {
             scanPaused = false
         }
 
-        scanIndex = (scanIndex + 1) % memories.count
+        scanIndex = (scanIndex + 1) % list.count
         tuneToScanIndex()
     }
 
     private func tuneToScanIndex() {
-        guard scanIndex < memories.count else { return }
-        let mem = memories[scanIndex]
+        let list = scanList
+        guard scanIndex < list.count else { return }
+        let mem = list[scanIndex]
         sendRadioState(freq: mem.freq, ptt: false, txAllowed: false)
+    }
+
+    func updateMemory(_ memory: Memory) {
+        guard let idx = memories.firstIndex(where: { $0.id == memory.id }) else { return }
+        memories[idx] = memory
+    }
+
+    func deleteMemory(id: UUID) {
+        memories.removeAll { $0.id == id }
     }
 
     func sendRadioState(freq: Float? = nil, ptt: Bool = false, txAllowed: Bool = true) {

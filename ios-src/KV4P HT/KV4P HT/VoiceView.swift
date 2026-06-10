@@ -592,8 +592,10 @@ private struct ScanBody: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
 
+    private var scanList: [Memory] { store.scanList }
+
     var body: some View {
-        if store.memories.isEmpty {
+        if scanList.isEmpty {
             VStack(spacing: 12) {
                 Spacer()
                 Image(systemName: "barcode.viewfinder")
@@ -627,7 +629,7 @@ private struct ScanBody: View {
                 }
                 .padding(.vertical, 20)
 
-                Text("Scan list · \(store.memories.count) channels")
+                Text("Scan list · \(scanList.count) channels")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(t.label2)
                     .textCase(.uppercase)
@@ -638,7 +640,7 @@ private struct ScanBody: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(Array(store.memories.enumerated()), id: \.element.id) { idx, mem in
+                        ForEach(Array(scanList.enumerated()), id: \.element.id) { idx, mem in
                             let active = store.isScanning && idx == store.scanIndex
                             HStack(spacing: 12) {
                                 Circle()
@@ -660,7 +662,7 @@ private struct ScanBody: View {
                             .padding(.horizontal, 16)
                             .frame(minHeight: 50)
                             .background(active ? t.accentSoft : Color.clear)
-                            if idx < store.memories.count - 1 {
+                            if idx < scanList.count - 1 {
                                 Divider().padding(.leading, 34).background(t.sep)
                             }
                         }

@@ -7,6 +7,7 @@ struct MemoriesView: View {
     let store: RadioStore
     @State private var showRepeaters = false
     @State private var showAddMemory = false
+    @State private var editingMemory: Memory? = nil
     @State private var searchText = ""
 
     private var filteredMemories: [Memory] {
@@ -36,6 +37,18 @@ struct MemoriesView: View {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     store.sendRadioState(freq: mem.freq)
                                 })
+                                .contextMenu {
+                                    Button {
+                                        editingMemory = mem
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        store.deleteMemory(id: mem.id)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -61,6 +74,12 @@ struct MemoriesView: View {
         }
         .sheet(isPresented: $showAddMemory) {
             AddMemoryView(store: store)
+                .environment(\.theme, store.theme)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $editingMemory) { mem in
+            AddMemoryView(store: store, editing: mem)
                 .environment(\.theme, store.theme)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -436,15 +455,30 @@ struct RepeaterBrowserView: View {
 struct AddMemoryView: View {
     @Environment(\.theme) var t
     @Environment(\.dismiss) var dismiss
-    @Bindable var store: RadioStore
+    let store: RadioStore
+    let editing: Memory?
 
     @State private var name = ""
     @State private var group = ""
     @State private var freqText = ""
     @State private var offsetText = "0"
     @State private var toneValue: Float = 0
+    @State private var scanEnabled = true
     @State private var bwWide = true
     @State private var showRepeaters = false
+
+    init(store: RadioStore, editing: Memory? = nil) {
+        self.store = store
+        self.editing = editing
+        if let m = editing {
+            _name = State(initialValue: m.name)
+            _group = State(initialValue: m.group)
+            _freqText = State(initialValue: m.freqString)
+            _offsetText = State(initialValue: m.offset == 0 ? "0" : String(format: "%.3f", m.offset))
+            _toneValue = State(initialValue: m.plTone)
+            _scanEnabled = State(initialValue: m.scanEnabled)
+        }
+    }
 
     private let tones: [Float] = [0, 67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8, 97.4, 100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 203.5]
 
@@ -455,18 +489,29 @@ struct AddMemoryView: View {
                     .font(.system(size: 17))
                     .foregroundStyle(t.accent)
                 Spacer()
-                Text("New Memory")
+                Text(editing == nil ? "New Memory" : "Edit Memory")
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(t.label)
                 Spacer()
                 Button("Save") {
                     guard let freq = Float(freqText), freq > 0 else { return }
                     let offset = Float(offsetText) ?? 0
-                    store.memories.append(Memory(
-                        name: name, group: group, freq: freq, offset: offset,
-                        plTone: toneValue, squelch: 2,
-                        isRepeater: offset != 0
-                    ))
+                    if var updated = editing {
+                        updated.name = name
+                        updated.group = group
+                        updated.freq = freq
+                        updated.offset = offset
+                        updated.plTone = toneValue
+                        updated.isRepeater = offset != 0
+                        updated.scanEnabled = scanEnabled
+                        store.updateMemory(updated)
+                    } else {
+                        store.memories.append(Memory(
+                            name: name, group: group, freq: freq, offset: offset,
+                            plTone: toneValue, squelch: 2,
+                            isRepeater: offset != 0, scanEnabled: scanEnabled
+                        ))
+                    }
                     dismiss()
                 }
                 .font(.system(size: 17, weight: .bold))
@@ -503,6 +548,14 @@ struct AddMemoryView: View {
                             label: "Bandwidth",
                             value: .constant(bwWide ? "Wide · 25 kHz" : "Narrow · 12.5 kHz"),
                             isLast: true
+                        )
+                    }
+
+                    ListGroupView(header: "Scan") {
+                        ListRow(
+                            title: "Include in Scan",
+                            isLast: true,
+                            accessory: KVToggle(isOn: $scanEnabled) as (any View)
                         )
                     }
 
