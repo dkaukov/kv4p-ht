@@ -1,10 +1,11 @@
 import Foundation
 import CoreLocation
-import MapKit
+import Observation
 
 @Observable
 class LocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
 
     var location: CLLocation?
     var locality: String?
@@ -22,9 +23,11 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         switch manager.authorizationStatus {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
+
         case .authorizedWhenInUse, .authorizedAlways:
             isLoading = true
             manager.requestLocation()
+
         default:
             break
         }
@@ -32,6 +35,7 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         authStatus = status
+
         if status == .authorizedWhenInUse || status == .authorizedAlways {
             isLoading = true
             manager.requestLocation()
@@ -39,7 +43,11 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let loc = locations.last else { return }
+        guard let loc = locations.last else {
+            isLoading = false
+            return
+        }
+
         location = loc
         isLoading = false
         reverseGeocode(loc)
@@ -50,10 +58,24 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     private func reverseGeocode(_ loc: CLLocation) {
-        guard let request = MKReverseGeocodingRequest(location: loc) else { return }
+        geocoder.cancelGeocode()
+
         Task { [weak self] in
-            guard let item = try? await request.mapItems.first else { return }
-            self?.locality = item.addressRepresentations?.cityWithContext(.automatic)
+            guard let self else { return }
+
+            guard let placemark = try? await geocoder.reverseGeocodeLocation(loc).first else {
+                return
+            }
+
+            let locality =
+                placemark.locality ??
+                placemark.subAdministrativeArea ??
+                placemark.administrativeArea ??
+                placemark.country
+
+            await MainActor.run {
+                self.locality = locality
+            }
         }
     }
 }
