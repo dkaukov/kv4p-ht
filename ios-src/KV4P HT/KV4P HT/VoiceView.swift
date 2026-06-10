@@ -577,7 +577,12 @@ private struct SystemVolumeSlider: View {
                 .foregroundStyle(t.label2)
                 .frame(width: 34, alignment: .trailing)
         }
+        // Write back only for user drags. KVO also fires when the audio
+        // session category flips for PTT (.playback ↔ .playAndRecord) and
+        // briefly reports the other route's volume — echoing that into
+        // MPVolumeView would actually set system volume (stuck-at-max bug).
         .onChange(of: observer.volume) { _, newVol in
+            guard observer.isUserDragging else { return }
             mpVolumeView?.subviews.compactMap({ $0 as? UISlider }).first?.value = Float(newVol)
         }
     }
