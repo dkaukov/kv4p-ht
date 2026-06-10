@@ -318,12 +318,15 @@ actor AudioManager {
         onDecodedSamples?(Array(pcmDecodeBuf.prefix(nSamples)), nSamples)
     }
 
-    // tanh soft limiter — prevents harsh digital clipping
+    // Soft limiter: identity below knee, then tanh squashes the remainder into
+    // [knee, 1.0). Value and slope are continuous at the knee — a discontinuity
+    // there modulates loud audio with harsh crackle.
     private static func softClip(_ x: Float) -> Float {
-        if x > 0.8 || x < -0.8 {
-            return 0.8 * tanhf(x / 0.8)
-        }
-        return x
+        let knee: Float = 0.8
+        let mag = abs(x)
+        if mag <= knee { return x }
+        let limited = knee + (1 - knee) * tanhf((mag - knee) / (1 - knee))
+        return x < 0 ? -limited : limited
     }
 
     // MARK: – TX Mic Capture
