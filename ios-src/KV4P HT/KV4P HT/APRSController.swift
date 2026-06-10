@@ -229,9 +229,8 @@ class APRSController {
     @discardableResult
     private func transmitPayload(_ payload: String) -> Bool {
         guard let store, let me = myCallsign else { return false }
-        // Firmware gates AX.25 TX on the global TX_ALLOWED desired-state flag,
-        // and other flows (scan, post-HELLO auto state) clear it — refresh first.
-        store.sendRadioState(txAllowed: true)
+        // Firmware gates AX.25 TX on the TX_ALLOWED desired-state flag, which
+        // RadioModuleController keeps set after HELLO — no refresh needed.
         let frame = AX25Frame(source: me, payload: Data(payload.utf8))
         store.ble.sendAx25Frame(frame.encodedWithoutFCS())
         return true
@@ -302,7 +301,7 @@ class APRSController {
         if let freq = beaconFreq, store.aprsBeaconFrequency != "Current" {
             // Frequency-switch beacon: tune, settle, send, wait out TX, restore.
             let originalFreq = store.currentFreq
-            store.sendRadioState(freq: freq, txAllowed: true)
+            store.sendRadioState(freq: freq)
             try? await Task.sleep(for: .milliseconds(500))
             transmitPayload(payload)
             try? await Task.sleep(for: .seconds(4))

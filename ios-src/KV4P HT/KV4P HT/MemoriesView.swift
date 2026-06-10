@@ -363,16 +363,7 @@ struct RepeaterBrowserView: View {
                                     Button {
                                         store.activeRepeaterId = isActive ? nil : rep.id
                                         if !isActive {
-                                            store.ble.sendDesiredState(
-                                                freqTx: rep.freq + rep.offset,
-                                                freqRx: rep.freq,
-                                                squelch: 2,
-                                                bw: store.bandwidth,
-                                                ctcssTx: ctcssIndex(for: rep.plTone),
-                                                filterPre: store.filterPreemphasis,
-                                                filterHigh: store.filterHighPass,
-                                                filterLow: store.filterLowPass
-                                            )
+                                            store.tune(toRepeater: rep)
                                         }
                                     } label: {
                                         Image(systemName: isActive ? "checkmark" : "bolt.fill")

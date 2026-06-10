@@ -256,6 +256,10 @@ actor AudioManager {
             try AVAudioSession.sharedInstance().setActive(true)
             ringBuffer.clear()
             started.pointee = false
+            // Per-session stats — cumulative counts across reconnects mislead.
+            rxFrameLog = 0
+            rxPeakMax = 0
+            rxClipCount = 0
             try engine.start()
             playing = true
             needsRestart = false

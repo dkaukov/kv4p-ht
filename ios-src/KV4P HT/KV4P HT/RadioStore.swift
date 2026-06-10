@@ -103,8 +103,11 @@ class RadioStore {
     var themeMode: AppThemeMode = .dark
     var theme: AppTheme { AppTheme.forMode(themeMode) }
 
-    // ── BLE
-    let ble = BLEManager()
+    // ── Radio
+    // Desired/applied radio state. UI writes go through this controller's
+    // setters (via helpers like sendRadioState); BLE is transport only.
+    let radio: RadioModuleController
+    let ble: BLEManager
 
     // ── Location
     let locationManager = LocationManager()
@@ -191,6 +194,9 @@ class RadioStore {
 
     // ── Init
     init() {
+        let radio = RadioModuleController()
+        self.radio = radio
+        self.ble = BLEManager(radio: radio)
         if let data = UserDefaults.standard.data(forKey: Self.memoriesKey),
            let decoded = try? JSONDecoder().decode([Memory].self, from: data) {
             memories = decoded
@@ -208,6 +214,14 @@ class RadioStore {
         aprs.store = self
         ble.onAx25Frame = { [weak self] data in
             DispatchQueue.main.async { self?.aprs.handleAx25Frame(data) }
+        }
+        // Controller seeds desired state from firmware on HELLO; squelch is a
+        // user setting, so re-apply the UI value on each (re)connect.
+        ble.onTransportReady = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.radio.setSquelch(self.squelch)
+            }
         }
         aprs.updateBeaconTimer()
     }
@@ -405,7 +419,7 @@ class RadioStore {
         let list = scanList
         guard scanIndex < list.count else { return }
         let mem = list[scanIndex]
-        sendRadioState(freq: mem.freq, ptt: false, txAllowed: false)
+        sendRadioState(freq: mem.freq, ptt: false)
     }
 
     func updateMemory(_ memory: Memory) {
@@ -417,17 +431,38 @@ class RadioStore {
         memories.removeAll { $0.id == id }
     }
 
-    func sendRadioState(freq: Float? = nil, ptt: Bool = false, txAllowed: Bool = true) {
+    // User-intent helper: pushes the current UI settings (and optional
+    // freq/PTT change) into the controller's desired state as one batch.
+    // The controller decides if a DesiredState frame actually goes out.
+    func sendRadioState(freq: Float? = nil, ptt: Bool = false) {
         let rxFreq = freq ?? currentFreq
         let mem = memory(for: rxFreq)
         let txFreq = mem.map { rxFreq + $0.offset } ?? rxFreq
         let tone = mem.map { ctcssIndex(for: $0.plTone) } ?? 0
-        ble.sendDesiredState(
-            freqTx: txFreq, freqRx: rxFreq, squelch: squelch,
-            ptt: ptt, txAllowed: txAllowed, highPower: isHighPower,
-            bw: bandwidth, ctcssTx: tone, ctcssRx: 0,
-            filterPre: filterPreemphasis, filterHigh: filterHighPass, filterLow: filterLowPass
-        )
+        radio.beginUpdate()
+        radio.setTxFrequency(txFreq)
+        radio.setRxFrequency(rxFreq)
+        radio.setSquelch(squelch)
+        radio.setBandwidth(bandwidth == 0 ? DRA818_25K : DRA818_12K5)
+        radio.setTxTone(tone)
+        radio.setRxTone(0)
+        radio.setFilters(emphasis: filterPreemphasis, highpass: filterHighPass, lowpass: filterLowPass)
+        radio.setHighPower(isHighPower)
+        if ptt { radio.pttDown() } else { radio.pttUp() }
+        radio.endUpdate()
+    }
+
+    func tune(toRepeater rep: Repeater) {
+        radio.beginUpdate()
+        radio.setTxFrequency(rep.freq + rep.offset)
+        radio.setRxFrequency(rep.freq)
+        radio.setSquelch(2)
+        radio.setBandwidth(bandwidth == 0 ? DRA818_25K : DRA818_12K5)
+        radio.setTxTone(ctcssIndex(for: rep.plTone))
+        radio.setRxTone(0)
+        radio.setFilters(emphasis: filterPreemphasis, highpass: filterHighPass, lowpass: filterLowPass)
+        radio.setHighPower(isHighPower)
+        radio.endUpdate()
     }
 
     // MARK: - RepeaterBook
@@ -557,5 +592,3 @@ enum RepeaterFetchState: Equatable {
     case idle, loading, loaded, empty
     case error(String)
 }
-
-// PTT is sent via ble.sendDesiredState(freq:squelch:ptt:txAllowed:)
