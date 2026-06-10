@@ -29,9 +29,16 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var audioAvailable = false
     // Called on bleQueue with decoded AX.25 frame bytes (no FCS).
     @ObservationIgnored var onAx25Frame: ((Data) -> Void)?
+    // Called on bleQueue after HELLO seeding + transport ready, so the app can
+    // re-apply user-level desired state (e.g. squelch) on each (re)connect.
+    @ObservationIgnored var onTransportReady: (() -> Void)?
 
     private let bleQueue = DispatchQueue(label: "kv4p-ht.ble", qos: .userInitiated)
     private let audio = AudioManager()
+    // Radio state lives in the controller; this class is transport only.
+    @ObservationIgnored private let radio: RadioModuleController
+    // Confined to bleQueue.
+    @ObservationIgnored private let gate = FlowControlGate()
 
     func setAudioSampleHook(_ handler: (([Float], Int) -> Void)?) {
         audio.onDecodedSamples = handler
@@ -41,14 +48,15 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var txChar: CBCharacteristic?
     private var rxChar: CBCharacteristic?
     private var parser = KissParser()
-    private var seq: UInt32 = UInt32(Date().timeIntervalSince1970)
     @ObservationIgnored private var pendingLogEntries: [String] = []
     @ObservationIgnored private var logFlushScheduled = false
     @ObservationIgnored private var transmitting = false
     @ObservationIgnored private var userInitiatedDisconnect = false
 
-    override init() {
+    init(radio: RadioModuleController) {
+        self.radio = radio
         super.init()
+        gate.onSend = { [weak self] frame in self?.writeRaw(frame) }
         central = CBCentralManager(delegate: self, queue: bleQueue)
         audioAvailable = audio.isAvailable  // nonisolated — no await needed
     }
@@ -88,45 +96,36 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         Task { await audio.recoverIfNeeded() }
     }
 
-    func sendDesiredState(freqTx: Float, freqRx: Float, squelch: UInt8,
-                          ptt: Bool = false, txAllowed: Bool = false, highPower: Bool = false,
-                          bw: UInt8 = 0, ctcssTx: UInt8 = 0, ctcssRx: UInt8 = 0,
-                          filterPre: Bool = false, filterHigh: Bool = false, filterLow: Bool = false) {
-        var flags: UInt16 = HOST_STATE_RADIO_CONFIG_VALID
-                          | HOST_STATE_RSSI_ENABLED
-                          | HOST_STATE_RX_AUDIO_OPEN
-                          | HOST_STATE_ENABLE_STATUS_REPORTS
-        if highPower  { flags |= HOST_STATE_HIGH_POWER }
-        if ptt        { flags |= HOST_STATE_PTT_REQUESTED }
-        if txAllowed  { flags |= HOST_STATE_TX_ALLOWED }
-        if filterPre  { flags |= HOST_STATE_FILTER_PRE }
-        if filterHigh { flags |= HOST_STATE_FILTER_HIGH }
-        if filterLow  { flags |= HOST_STATE_FILTER_LOW }
-        seq += 1
-        let payload = buildDesiredState(sequence: seq, freqTx: freqTx, freqRx: freqRx,
-                                        squelch: squelch, flags: flags,
-                                        bw: bw, ctcssTx: ctcssTx, ctcssRx: ctcssRx)
-        let frame   = buildKv4pVendorFrame(command: 0x0D, payload: payload)
-        writeRaw(frame)
-        print("[BLE] sendDesiredState ptt=\(ptt) transmitting=\(transmitting)")
-        if ptt != transmitting {
-            if ptt {
-                startTransmitting()
-            } else {
-                stopTransmitting()
+    // Transport hook for RadioModuleController — the controller decides what
+    // to send and when; this only encodes, gates, and writes. Also where the
+    // audio handoff happens: mic capture follows the PTT_REQUESTED flag of
+    // frames actually emitted.
+    private func sendDesiredState(_ state: HostDesiredState) {
+        bleQueue.async { [weak self] in
+            guard let self else { return }
+            let frame = buildKv4pVendorFrame(command: 0x0D, payload: state.encoded())
+            self.gate.submit(frame)
+            let ptt = (state.flags & HOST_STATE_PTT_REQUESTED) != 0
+            if ptt != self.transmitting {
+                if ptt {
+                    self.startTransmitting()
+                } else {
+                    self.stopTransmitting()
+                }
             }
+            self.log(String(format: "→ DesiredState seq=%d tx=%.4f rx=%.4f sq=%d flags=0x%04X bw=%d tone=%d",
+                            state.sequence, state.freqTx, state.freqRx, state.squelch,
+                            state.flags, state.bw, state.ctcssTx))
         }
-        log(String(format: "→ DesiredState tx=%.4f rx=%.4f sq=%d ptt=%d hp=%d bw=%d tone=%d",
-                   freqTx, freqRx, squelch, ptt ? 1 : 0, highPower ? 1 : 0, bw, ctcssTx))
     }
 
     // Sends raw AX.25 bytes (no FCS) for the firmware's AFSK modem to
-    // transmit. Firmware keys/unkeys PTT itself; caller must have already
-    // sent a DesiredState with TX_ALLOWED set.
+    // transmit. Firmware keys/unkeys PTT itself; TX_ALLOWED is kept set in
+    // desired state after HELLO.
     func sendAx25Frame(_ ax25: Data) {
         let frame = buildKissDataFrame(ax25)
         bleQueue.async { [weak self] in
-            self?.writeRaw(frame)
+            self?.gate.submit(frame)
         }
         log("→ AX.25 \(ax25.count)B")
     }
@@ -135,7 +134,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     private func sendTxAudio(_ adpcmFrame: Data) {
         let frame = buildKv4pVendorFrame(command: 0x0C, payload: adpcmFrame)
-        writeRaw(frame)
+        gate.submit(frame)
         txAudioFrameCount += 1
         if txAudioFrameCount % 25 == 1 {
             print("[BLE] TX audio #\(txAudioFrameCount) payload=\(adpcmFrame.count)B wire=\(frame.count)B periph=\(peripheral != nil) rxChar=\(rxChar != nil)")
@@ -232,6 +231,8 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         audioFrameCount = 0
         transmitting = false
         parser.reset()
+        radio.detachTransport()
+        gate.reset()
         Task { [weak self] in
             guard let self else { return }
             // stop() must finish before a reconnect's audio.start() —
@@ -317,25 +318,37 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         switch command {
         case 0x06:
             if let h = parseHello(Data(body)) {
+                gate.setWindow(Int(h.windowSize))
+                // HELLO = FirmwareVersion + initial DeviceState. Seed both into
+                // the controller and surface the applied state to the UI before
+                // any app-driven changes go out.
+                radio.attachTransport { [weak self] state in self?.sendDesiredState(state) }
+                radio.seedFirmwareInfo(h)
+                radio.seedFromDeviceState(h.deviceState)
                 onMain {
                     self.hello = h
                     self.deviceState = h.deviceState
                     self.bleState = .ready
                 }
-                log(String(format: "← HELLO fw=%d %@ %.0f–%.0f MHz",
+                log(String(format: "← HELLO fw=%d %@ %.0f–%.0f MHz win=%d",
                     h.firmwareVersion,
                     h.rfModuleType == 0 ? "VHF" : "UHF",
-                    h.minFreq, h.maxFreq))
+                    h.minFreq, h.maxFreq, h.windowSize))
                 Task {
                     await audio.start()
                     let playing = await audio.isPlaying
                     self.onMain { self.audioPlaying = playing }
                     self.log(playing ? "Audio engine started" : "Audio engine failed to start")
                 }
-                // ESP32 won't stream audio until it receives DesiredState with RX_AUDIO_OPEN.
-                let rxFreq = h.deviceState.freqRx > 100 ? h.deviceState.freqRx : 146.520
-                sendDesiredState(freqTx: rxFreq, freqRx: rxFreq, squelch: 0)
-                log(String(format: "→ auto DesiredState %.4f MHz (RX audio open)", rxFreq))
+                // App-required desired-state changes only; the controller diffs
+                // against the seeded baseline and emits a single update without
+                // overwriting unrelated firmware config.
+                radio.beginUpdate()
+                radio.markTransportReady()
+                radio.setTxAllowed(true)
+                radio.openAudio()  // ESP32 won't stream audio until RX_AUDIO_OPEN is set
+                radio.endUpdate()
+                onTransportReady?()
             }
         case 0x0C:
             audioFrameCount += 1
@@ -345,9 +358,12 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 log(String(format: "  jitter-buf: %.0f ms", audio.fillMs))
             }
         case 0x09:
-            break
+            if let size = parseWindowUpdate(Data(body)) {
+                gate.enlargeWindow(by: Int(size))
+            }
         case 0x0B:
             if let ds = parseDeviceState(Data(body)) {
+                radio.updateDeviceState(ds)
                 onMain { self.deviceState = ds }
             }
         case 0x01, 0x02, 0x03:

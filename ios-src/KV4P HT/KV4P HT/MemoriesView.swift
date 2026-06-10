@@ -35,7 +35,7 @@ struct MemoriesView: View {
                             ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, mem in
                                 MemoryRow(memory: mem, channelNum: idx + 1, groupColor: t.accent, isLast: idx == group.items.count - 1, isActive: mem.id == store.activeMemoryId, onTap: {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    store.sendRadioState(freq: mem.freq)
+                                    store.applyMemory(mem)
                                 })
                                 .contextMenu {
                                     Button {
@@ -363,16 +363,7 @@ struct RepeaterBrowserView: View {
                                     Button {
                                         store.activeRepeaterId = isActive ? nil : rep.id
                                         if !isActive {
-                                            store.ble.sendDesiredState(
-                                                freqTx: rep.freq + rep.offset,
-                                                freqRx: rep.freq,
-                                                squelch: 2,
-                                                bw: store.bandwidth,
-                                                ctcssTx: ctcssIndex(for: rep.plTone),
-                                                filterPre: store.filterPreemphasis,
-                                                filterHigh: store.filterHighPass,
-                                                filterLow: store.filterLowPass
-                                            )
+                                            store.tune(toRepeater: rep)
                                         }
                                     } label: {
                                         Image(systemName: isActive ? "checkmark" : "bolt.fill")

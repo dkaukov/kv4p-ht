@@ -5,12 +5,11 @@ import CoreLocation
 // MARK: - Data Models
 
 enum VoiceMode: String, CaseIterable {
-    case simplex, repeater, scan
+    case vfo, scan
     var label: String {
         switch self {
-        case .simplex:  return "Simplex"
-        case .repeater: return "Repeater"
-        case .scan:     return "Scan"
+        case .vfo:  return "VFO"
+        case .scan: return "Scan"
         }
     }
 }
@@ -103,8 +102,11 @@ class RadioStore {
     var themeMode: AppThemeMode = .dark
     var theme: AppTheme { AppTheme.forMode(themeMode) }
 
-    // ── BLE
-    let ble = BLEManager()
+    // ── Radio
+    // Desired/applied radio state. UI writes go through this controller's
+    // setters (via helpers like sendRadioState); BLE is transport only.
+    let radio: RadioModuleController
+    let ble: BLEManager
 
     // ── Location
     let locationManager = LocationManager()
@@ -113,8 +115,12 @@ class RadioStore {
     var repeaterSearchBand: Int = 4      // 4=2m, 16=70cm
 
     // ── Voice
-    var voiceMode: VoiceMode = .simplex
+    var voiceMode: VoiceMode = .vfo
     var squelch: UInt8 = 3
+    // Desired VFO channel config; survives without a memory match. Seeded
+    // from firmware-applied state on connect and from memory/repeater tunes.
+    var vfoOffset: Float = 0       // MHz, 0 = simplex
+    var vfoToneIndex: UInt8 = 0    // CTCSS index, 0 = off
     var captionsEnabled: Bool = false
     var isRecording: Bool = false
     var isScanning: Bool = false
@@ -191,6 +197,9 @@ class RadioStore {
 
     // ── Init
     init() {
+        let radio = RadioModuleController()
+        self.radio = radio
+        self.ble = BLEManager(radio: radio)
         if let data = UserDefaults.standard.data(forKey: Self.memoriesKey),
            let decoded = try? JSONDecoder().decode([Memory].self, from: data) {
             memories = decoded
@@ -208,6 +217,15 @@ class RadioStore {
         aprs.store = self
         ble.onAx25Frame = { [weak self] data in
             DispatchQueue.main.async { self?.aprs.handleAx25Frame(data) }
+        }
+        // Controller seeds desired state from firmware on HELLO; copy the
+        // applied firmware config into the UI settings so the next user
+        // action doesn't overwrite firmware state with stale UI defaults.
+        ble.onTransportReady = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.hydrateUISettingsFromAppliedState()
+            }
         }
         aprs.updateBeaconTimer()
     }
@@ -243,6 +261,18 @@ class RadioStore {
             beaconFrequency: aprsBeaconFrequency, positionApprox: aprsPositionApprox)
         guard let data = try? JSONEncoder().encode(s) else { return }
         UserDefaults.standard.set(data, forKey: Self.aprsSettingsKey)
+    }
+
+    private func hydrateUISettingsFromAppliedState() {
+        guard let ds = radio.deviceState else { return }
+        squelch = ds.squelch
+        bandwidth = ds.bw == DRA818_25K ? 0 : 1
+        txPower = (ds.flags & HOST_STATE_HIGH_POWER) != 0 ? "5 W" : "1 W"
+        filterPreemphasis = (ds.flags & HOST_STATE_FILTER_PRE) != 0
+        filterHighPass = (ds.flags & HOST_STATE_FILTER_HIGH) != 0
+        filterLowPass = (ds.flags & HOST_STATE_FILTER_LOW) != 0
+        vfoOffset = ds.freqTx - ds.freqRx
+        vfoToneIndex = ds.ctcssTx
     }
 
     private func configureSpeechManager() {
@@ -304,11 +334,30 @@ class RadioStore {
         ble.deviceState?.rssi ?? 0
     }
 
+    // Applied TX offset from firmware state; preserves split TX/RX config
+    // that has no matching memory.
+    var currentTxOffset: Float {
+        guard let ds = ble.deviceState else { return 0 }
+        return ds.freqTx - ds.freqRx
+    }
+
+    var currentOffsetString: String {
+        let offset = currentTxOffset
+        if abs(offset) < 0.0005 { return "Simplex" }
+        return offset > 0 ? String(format: "+%.3f", offset) : String(format: "%.3f", offset)
+    }
+
+    // Applied TX tone from firmware state.
+    var currentToneString: String {
+        guard let ds = ble.deviceState, let hz = ctcssToneHz(for: ds.ctcssTx) else { return "Off" }
+        return String(format: "PL %.1f", hz)
+    }
+
     var rxMode: RadioRxState {
         guard let ds = ble.deviceState else { return .idle }
         switch ds.mode {
         case 0: return .tx
-        case 1: return .rx
+        case 1: return (ds.flags & DEVICE_STATE_SQUELCHED) == 0 ? .rx : .idle
         default: return .idle
         }
     }
@@ -404,8 +453,7 @@ class RadioStore {
     private func tuneToScanIndex() {
         let list = scanList
         guard scanIndex < list.count else { return }
-        let mem = list[scanIndex]
-        sendRadioState(freq: mem.freq, ptt: false, txAllowed: false)
+        applyMemory(list[scanIndex])
     }
 
     func updateMemory(_ memory: Memory) {
@@ -417,17 +465,45 @@ class RadioStore {
         memories.removeAll { $0.id == id }
     }
 
-    func sendRadioState(freq: Float? = nil, ptt: Bool = false, txAllowed: Bool = true) {
+    // User-intent helper: pushes the current UI settings + VFO channel
+    // config (and optional freq/PTT change) into the controller's desired
+    // state as one batch. The controller decides if a DesiredState frame
+    // actually goes out. Offset and tone come from the VFO fields — tuning
+    // a memory or repeater seeds them first via applyMemory/tune(toRepeater:).
+    // simplexOverride: transmit on the RX frequency with no tone, without
+    // touching the VFO fields (APRS frequency-switch beacons are simplex).
+    func sendRadioState(freq: Float? = nil, ptt: Bool = false, simplexOverride: Bool = false) {
         let rxFreq = freq ?? currentFreq
-        let mem = memory(for: rxFreq)
-        let txFreq = mem.map { rxFreq + $0.offset } ?? rxFreq
-        let tone = mem.map { ctcssIndex(for: $0.plTone) } ?? 0
-        ble.sendDesiredState(
-            freqTx: txFreq, freqRx: rxFreq, squelch: squelch,
-            ptt: ptt, txAllowed: txAllowed, highPower: isHighPower,
-            bw: bandwidth, ctcssTx: tone, ctcssRx: 0,
-            filterPre: filterPreemphasis, filterHigh: filterHighPass, filterLow: filterLowPass
-        )
+        radio.beginUpdate()
+        radio.setTxFrequency(rxFreq + (simplexOverride ? 0 : vfoOffset))
+        radio.setRxFrequency(rxFreq)
+        radio.setSquelch(squelch)
+        radio.setBandwidth(bandwidth == 0 ? DRA818_25K : DRA818_12K5)
+        radio.setTxTone(simplexOverride ? 0 : vfoToneIndex)
+        radio.setRxTone(0)
+        radio.setFilters(emphasis: filterPreemphasis, highpass: filterHighPass, lowpass: filterLowPass)
+        radio.setHighPower(isHighPower)
+        if ptt { radio.pttDown() } else { radio.pttUp() }
+        radio.endUpdate()
+    }
+
+    func applyMemory(_ mem: Memory) {
+        vfoOffset = mem.offset
+        vfoToneIndex = ctcssIndex(for: mem.plTone)
+        sendRadioState(freq: mem.freq)
+    }
+
+    func tune(toRepeater rep: Repeater) {
+        vfoOffset = rep.offset
+        vfoToneIndex = ctcssIndex(for: rep.plTone)
+        sendRadioState(freq: rep.freq)
+    }
+
+    // Pill-editor entry point: one desired-state push for both fields.
+    func setVfoConfig(offset: Float, toneIndex: UInt8) {
+        vfoOffset = offset
+        vfoToneIndex = toneIndex
+        sendRadioState()
     }
 
     // MARK: - RepeaterBook
@@ -546,7 +622,7 @@ enum RadioRxState {
     case idle, rx, tx
     var label: String {
         switch self {
-        case .idle: return "MONITOR"
+        case .idle: return "IDLE"
         case .rx:   return "RECEIVING"
         case .tx:   return "TRANSMIT"
         }
@@ -557,5 +633,3 @@ enum RepeaterFetchState: Equatable {
     case idle, loading, loaded, empty
     case error(String)
 }
-
-// PTT is sent via ble.sendDesiredState(freq:squelch:ptt:txAllowed:)

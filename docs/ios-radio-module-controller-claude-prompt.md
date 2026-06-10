@@ -114,6 +114,60 @@ UI writes must go through `RadioModuleController` desired-state APIs. Avoid bypa
 
 Use injected send callbacks in tests so the controller can be tested without CoreBluetooth or audio.
 
+## PR Review Follow-ups (PR #11, dkaukov)
+
+The first implementation pass left UI paths that blurred desired state and
+applied/device state. The rule: user interactions mutate desired state;
+firmware `DeviceState` drives applied/visible radio state. The UI must not
+show TX or active RX just because the user requested it.
+
+1. Hydrate UI settings from applied state. After HELLO,
+   `ble.onTransportReady` must copy applied firmware state (squelch,
+   bandwidth, TX power, filters) into UI settings via
+   `hydrateUISettingsFromAppliedState()` instead of pushing only UI squelch
+   into desired state. Otherwise stale UI defaults can overwrite
+   firmware-applied config on the next user action.
+
+2. RX/TX UI must follow device state. In `VoiceView.RadioStage`:
+   - `RxBadge` state comes only from `store.rxMode`.
+   - Frequency color comes only from applied state (red when `.tx`, green
+     when `.rx`, default when `.idle`).
+   - S-meter TX suppression uses applied TX state only.
+   - PTT button visual feedback may still use local request state
+     (`pttDown` / sticky PTT) so the button feels responsive.
+
+3. Receiving means squelch open. Firmware mode `RX` displays as `RECEIVING`
+   only when `DEVICE_STATE_SQUELCHED` is clear; otherwise idle. Idle label is
+   `IDLE` (was `MONITOR`).
+
+4. Preserve and display applied TX offset. `RadioStore` exposes
+   `currentTxOffset` / `currentOffsetString` derived from
+   `deviceState.freqTx - freqRx`. The voice channel display uses
+   `matched?.offsetString ?? store.currentOffsetString`. In
+   `sendRadioState`, when no memory matches, preserve the applied TX offset
+   instead of forcing `txFreq = rxFreq`. Do not infer or switch `voiceMode`
+   from offset; offset is radio config, `voiceMode` is a UI workflow
+   selection.
+
+## VFO Mode Consolidation (follow-on UX change)
+
+The Voice tab's Simplex/Repeater modes were collapsed into a single VFO mode
+(picker is now `VFO | Scan`). Rationale: on a real HT, repeater-vs-simplex is
+channel configuration (offset + tone), not a mode; the split also made
+simplex-with-offset homeless and let `sendRadioState` clobber the TX tone
+whenever no memory matched the tuned frequency.
+
+- `RadioStore` carries desired VFO channel config (`vfoOffset`,
+  `vfoToneIndex`), seeded from firmware-applied state on connect and by
+  `applyMemory(_:)` / `tune(toRepeater:)`. `sendRadioState` uses these fields
+  directly — no memory lookup, no forced tone 0, no collapse to simplex.
+- The Offset and Tone pills display applied state and open an editor sheet
+  that edits desired state via `setVfoConfig(offset:toneIndex:)`.
+- APRS frequency-switch beacons pass `simplexOverride: true` so beacon TX
+  ignores the VFO offset/tone without mutating them.
+- `voiceMode` remains a pure UI workflow selection (`vfo`/`scan`); offset is
+  radio config, per the PR #11 rule above.
+
 ## Constraints
 
 - Do not rewrite the UI.
