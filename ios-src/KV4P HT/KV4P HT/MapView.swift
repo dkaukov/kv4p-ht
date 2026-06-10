@@ -6,18 +6,50 @@ import MapKit
 struct APRSMapView: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
-    @State private var position: MapCameraPosition = .region(MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 35.994, longitude: -78.898),
-        span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3)
-    ))
+    @State private var position: MapCameraPosition = .userLocation(
+        fallback: .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 35.994, longitude: -78.898),
+            span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3)
+        ))
+    )
+    @State private var selectedEntry: APRSEntry? = nil
+
+    // Latest position-bearing entry per station callsign.
+    private var stations: [MapStation] {
+        var latest: [String: APRSEntry] = [:]
+        for entry in store.aprs.entries where entry.lat != nil && entry.lon != nil && !entry.isOutgoing {
+            let key = entry.kind == .object ? (entry.objName ?? entry.callsign) : entry.callsign
+            if let existing = latest[key], existing.timestamp > entry.timestamp { continue }
+            latest[key] = entry
+        }
+        return latest.map { key, entry in
+            let kind: StationKind
+            let color: String
+            if entry.kind == .weather || entry.weather != nil {
+                kind = .weather; color = "green"
+            } else if entry.symbolCode == ">" || entry.symbolCode == "k" || entry.symbolCode == "j" {
+                kind = .mobile; color = "amber"
+            } else {
+                kind = .fixed; color = "accent"
+            }
+            return MapStation(callsign: key, lat: entry.lat!, lon: entry.lon!,
+                              kind: kind, color: color, entry: entry)
+        }
+    }
 
     var body: some View {
         ZStack {
             Map(position: $position) {
-                ForEach([MapStation]()) { station in
+                UserAnnotation()
+                ForEach(stations) { station in
                     Annotation(station.callsign, coordinate: station.coordinate) {
-                        StationPin(station: station, isSelected: false)
-                            .environment(\.theme, store.theme)
+                        Button {
+                            selectedEntry = station.entry
+                        } label: {
+                            StationPin(station: station, isSelected: false)
+                        }
+                        .buttonStyle(.plain)
+                        .environment(\.theme, store.theme)
                     }
                 }
             }
@@ -47,18 +79,28 @@ struct APRSMapView: View {
 
                 Spacer()
 
-                VStack(spacing: 8) {
-                    Image(systemName: "map")
-                        .font(.system(size: 28))
-                        .foregroundStyle(t.label2)
-                    Text("APRS position data coming soon")
-                        .font(.system(size: 15))
-                        .foregroundStyle(t.label2)
+                if stations.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "map")
+                            .font(.system(size: 28))
+                            .foregroundStyle(t.label2)
+                        Text("No station positions heard yet")
+                            .font(.system(size: 15))
+                            .foregroundStyle(t.label2)
+                    }
+                    .padding(.bottom, 40)
                 }
-                .padding(.bottom, 40)
             }
         }
         .environment(\.theme, store.theme)
+        .sheet(item: $selectedEntry) { entry in
+            NavigationStack {
+                APRSDetailView(store: store, entry: entry) { _ in }
+            }
+            .environment(\.theme, store.theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 }
 
@@ -67,12 +109,14 @@ struct APRSMapView: View {
 enum StationKind { case fixed, weather, mobile }
 
 struct MapStation: Identifiable {
-    let id = UUID()
     var callsign: String
     var lat: Double
     var lon: Double
     var kind: StationKind
     var color: String  // theme token name
+    var entry: APRSEntry? = nil
+
+    var id: String { callsign }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat, longitude: lon)

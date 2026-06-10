@@ -72,29 +72,6 @@ struct Repeater: Identifiable {
 
 }
 
-enum APRSPacketKind: String {
-    case message, bulletin, weather, position
-    var label: String {
-        switch self {
-        case .message:  return "Message"
-        case .bulletin: return "Bulletin"
-        case .weather:  return "Weather"
-        case .position: return "Position"
-        }
-    }
-}
-
-struct APRSPacket: Identifiable {
-    let id = UUID()
-    var callsign: String
-    var kind: APRSPacketKind
-    var text: String
-    var time: String
-    var distanceMi: Float
-    var isNew: Bool = false
-
-}
-
 struct CaptionLine: Identifiable {
     let id = UUID()
     var callsign: String
@@ -157,9 +134,34 @@ class RadioStore {
     var activeRepeaterId: UUID? = nil
 
     // ── APRS
-    var aprsPackets: [APRSPacket] = []
+    let aprs = APRSController()
     var aprsFilter: String = "All"
-    var selectedPacket: APRSPacket? = nil
+    var selectedEntry: APRSEntry? = nil
+    var aprsSymbol: String = "[" {
+        didSet { if !isInitializing { saveAprsSettings() } }
+    }
+    var aprsBeaconEnabled: Bool = false {
+        didSet {
+            if !isInitializing {
+                saveAprsSettings()
+                aprs.updateBeaconTimer()
+            }
+        }
+    }
+    var aprsBeaconIntervalMin: Int = 15 {
+        didSet {
+            if !isInitializing {
+                saveAprsSettings()
+                aprs.updateBeaconTimer()
+            }
+        }
+    }
+    var aprsBeaconFrequency: String = "Current" {
+        didSet { if !isInitializing { saveAprsSettings() } }
+    }
+    var aprsPositionApprox: Bool = false {
+        didSet { if !isInitializing { saveAprsSettings() } }
+    }
 
     // ── Recordings
     var recordings: [Recording] = []
@@ -170,8 +172,12 @@ class RadioStore {
     @ObservationIgnored private var wasSquelched = true
 
     // ── Settings
-    var callsign: String = ""
-    var aprsSSID: String = ""
+    var callsign: String = "" {
+        didSet { if !isInitializing { saveAprsSettings() } }
+    }
+    var aprsSSID: String = "" {
+        didSet { if !isInitializing { saveAprsSettings() } }
+    }
     var txPower: String = "1 W"
     var filterPreemphasis: Bool = true
     var filterHighPass: Bool = true
@@ -195,8 +201,48 @@ class RadioStore {
                        isRepeater: false, notes: "National calling frequency")
             ]
         }
+        loadAprsSettings()
         isInitializing = false
         configureSpeechManager()
+
+        aprs.store = self
+        ble.onAx25Frame = { [weak self] data in
+            DispatchQueue.main.async { self?.aprs.handleAx25Frame(data) }
+        }
+        aprs.updateBeaconTimer()
+    }
+
+    private static let aprsSettingsKey = "aprsSettings"
+
+    private struct APRSSettings: Codable {
+        var callsign: String
+        var ssid: String
+        var symbol: String
+        var beaconEnabled: Bool
+        var beaconIntervalMin: Int
+        var beaconFrequency: String
+        var positionApprox: Bool
+    }
+
+    private func loadAprsSettings() {
+        guard let data = UserDefaults.standard.data(forKey: Self.aprsSettingsKey),
+              let s = try? JSONDecoder().decode(APRSSettings.self, from: data) else { return }
+        callsign = s.callsign
+        aprsSSID = s.ssid
+        aprsSymbol = s.symbol
+        aprsBeaconEnabled = s.beaconEnabled
+        aprsBeaconIntervalMin = s.beaconIntervalMin
+        aprsBeaconFrequency = s.beaconFrequency
+        aprsPositionApprox = s.positionApprox
+    }
+
+    private func saveAprsSettings() {
+        let s = APRSSettings(
+            callsign: callsign, ssid: aprsSSID, symbol: aprsSymbol,
+            beaconEnabled: aprsBeaconEnabled, beaconIntervalMin: aprsBeaconIntervalMin,
+            beaconFrequency: aprsBeaconFrequency, positionApprox: aprsPositionApprox)
+        guard let data = try? JSONEncoder().encode(s) else { return }
+        UserDefaults.standard.set(data, forKey: Self.aprsSettingsKey)
     }
 
     private func configureSpeechManager() {

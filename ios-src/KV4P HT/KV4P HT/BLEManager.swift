@@ -27,6 +27,8 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var bleUnavailable = false
     var audioPlaying = false
     var audioAvailable = false
+    // Called on bleQueue with decoded AX.25 frame bytes (no FCS).
+    @ObservationIgnored var onAx25Frame: ((Data) -> Void)?
 
     private let bleQueue = DispatchQueue(label: "kv4p-ht.ble", qos: .userInitiated)
     private let audio = AudioManager()
@@ -116,6 +118,17 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         log(String(format: "→ DesiredState tx=%.4f rx=%.4f sq=%d ptt=%d hp=%d bw=%d tone=%d",
                    freqTx, freqRx, squelch, ptt ? 1 : 0, highPower ? 1 : 0, bw, ctcssTx))
+    }
+
+    // Sends raw AX.25 bytes (no FCS) for the firmware's AFSK modem to
+    // transmit. Firmware keys/unkeys PTT itself; caller must have already
+    // sent a DesiredState with TX_ALLOWED set.
+    func sendAx25Frame(_ ax25: Data) {
+        let frame = buildKissDataFrame(ax25)
+        bleQueue.async { [weak self] in
+            self?.writeRaw(frame)
+        }
+        log("→ AX.25 \(ax25.count)B")
     }
 
     @ObservationIgnored private var txAudioFrameCount = 0
@@ -282,7 +295,9 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         for (cmd, payload) in frames {
             switch cmd {
             case 0x06: handleVendorFrame(payload)
-            case 0x00: log("← AX.25 \(payload.count)B")
+            case 0x00:
+                log("← AX.25 \(payload.count)B")
+                onAx25Frame?(payload)
             default:   break
             }
         }

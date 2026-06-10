@@ -102,6 +102,12 @@ func buildKv4pVendorFrame(command: UInt8, payload: Data) -> Data {
     return Data([KISS_FEND, 0x06]) + escaped + Data([KISS_FEND])
 }
 
+// KISS DATA frame (port 0, cmd 0): raw AX.25 bytes for the firmware's AFSK
+// modem to transmit. The firmware self-keys PTT (TX_ALLOWED flag required).
+func buildKissDataFrame(_ ax25: Data) -> Data {
+    Data([KISS_FEND, 0x00]) + kissEscape(ax25) + Data([KISS_FEND])
+}
+
 // Builds using byte-append so there are no alignment requirements on any field.
 // (storeBytes crashes in debug builds at unaligned offsets, e.g. Float at offset 11/15.)
 func buildDesiredState(sequence: UInt32, freqTx: Float, freqRx: Float, squelch: UInt8,

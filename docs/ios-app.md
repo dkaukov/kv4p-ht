@@ -2,7 +2,7 @@
 
 **Source:** `ios-src/KV4P HT/`
 **Goal:** Native SwiftUI client for the KV4P-HT over BLE — voice RX/TX, APRS, memories — replacing the need for the Android/USB path on iPhone.
-**Status:** Core voice path working. Background audio + PTT-only mic indicator implemented 2026-06-09; both need on-device verification.
+**Status:** Core voice path working. Background audio + PTT-only mic indicator implemented 2026-06-09; both need on-device verification. Full APRS (RX parse + message TX/ack + position beacon + map pins + settings) implemented 2026-06-09; needs on-air verification.
 
 The firmware this app talks to is **dkaukov's fork, branch `feature/ble`**
 (https://github.com/dkaukov/kv4p-ht/tree/feature/ble), *not* this repo's
@@ -16,8 +16,11 @@ The firmware this app talks to is **dkaukov's fork, branch `feature/ble`**
 |------|------|
 | `BLEManager.swift` | `CBCentralManager` + `CBPeripheralDelegate` on a dedicated `bleQueue`. Scans/connects, KISS framing in/out, owns the `AudioManager`. |
 | `AudioManager.swift` | Swift `actor`. AVAudioEngine playback via `AVAudioSourceNode` fed from a lock-free SPSC ring buffer; inline IMA ADPCM decode (RX) and encode (TX mic tap). |
-| `KissProtocol.swift` | KISS framing + KV4P vendor frame build/parse. |
-| `RadioStore.swift` | `@Observable` app state: frequency, squelch, PTT, memories, scene-phase hooks. |
+| `KissProtocol.swift` | KISS framing + KV4P vendor frame build/parse. Also builds raw KISS DATA frames (cmd 0x00) carrying AX.25 bytes for APRS. |
+| `RadioStore.swift` | `@Observable` app state: frequency, squelch, PTT, memories, APRS settings, scene-phase hooks. |
+| `AX25.swift` | AX.25 UI-frame codec: callsign encode/decode, frame encode/decode (no FCS — firmware appends it). |
+| `APRS.swift` | APRS payload parse/build by DTI: position (compressed + uncompressed), message/ack, object, weather. |
+| `APRSController.swift` | `@Observable` APRS state: `APRSEntry` model, persistence (UserDefaults JSON), RX dedupe, auto-ack, message TX, position beacon (incl. frequency-switch beacon). |
 | `ContentView.swift` / `VoiceView` / `APRSView` / `MapView` / `MemoriesView` / `MoreView` | SwiftUI UI, custom tab bar. |
 | `SpeechManager.swift` | Live-caption speech recognition fed from decoded RX samples. |
 | `LocationManager.swift` | CoreLocation + MapKit reverse geocoding (locality for memory groups). |
@@ -153,6 +156,67 @@ slope at the knee.
 
 ---
 
+## APRS (implemented 2026-06-09)
+
+Full parity port of Android's APRS feature: RX parse, message TX with acks,
+position beacon, map pins, settings. Deferred (matches Android's own deferred
+extras): digipeat, MIC-E decode.
+
+**Architecture:** the firmware is a full AFSK 1200-baud (Bell 202) modem — the
+host does zero DSP. Host sends a raw AX.25 UI-frame (without FCS, firmware's
+AfskModulator appends it) as a KISS DATA frame (cmd 0x00). Firmware self-keys
+PTT (`handleAx25Data`, gated only on `HOST_STATE_TX_ALLOWED`), modulates,
+transmits, un-keys, and returns to RX. RX direction: firmware demodulates and
+sends decoded AX.25 bytes back as KISS DATA, which `BLEManager` now forwards
+via `onAx25Frame` instead of dropping.
+
+- **`AX25.swift`** — `AX25Callsign` (7-byte wire encode/decode: chars `<<1`,
+  SSID byte `0x60 | (ssid<<1)`, last-address bit `0x01`, repeated bit `0x80`),
+  `AX25Frame` (dest/src/digipeaters + payload, `encodedWithoutFCS()` /
+  `init?(decoding:)`). Outgoing frames default dest to `APKVPA` (vendor
+  TOCALL) and digipeaters to `[WIDE1-1, WIDE2-1]`.
+- **`APRS.swift`** — `parseAPRSPayload` dispatches on the DTI (`!`/`=`/`/`/`@`
+  position, `:` message/ack/rej, `;` object, `_`/`#`/`*` weather, else
+  `.raw`). Builders `compressedPositionString` (base-91, mirrors
+  `Position.toCompressedString`) and `messagePayload` (`:TO    :body{num`,
+  67-char limit).
+- **`APRSController.swift`** — `entries: [APRSEntry]` persisted to
+  UserDefaults (`aprsEntries`, JSON, cap 500). RX dedupe by
+  `source|dest|payload` key with 28 s TTL. Directed messages to my
+  callsign-SSID get auto-acked; incoming `ackN`/`rejN` flip
+  `wasAcknowledged` on the matching outgoing entry. `sendMessage(to:text:)`
+  sanitizes `| ~ {`, defaults empty "to" to `BLN1CQ`, persists a wrapping
+  message-number counter (max 99999). `sendPositionBeacon()` builds a
+  compressed-position payload from `LocationManager`, with optional 0.01°
+  rounding (`aprsPositionApprox`) and an optional frequency-switch beacon
+  (tune to 144.390, send, wait, restore — mirrors Android's
+  `performPositionBeacon`). Beacon timer driven by `aprsBeaconEnabled` /
+  `aprsBeaconIntervalMin`, paused during scan.
+- **TX gating** — every AX.25 send is preceded by a fresh
+  `DesiredState(txAllowed: true)`, since the post-HELLO auto-state sends
+  `txAllowed: false` and scan can also clear it. No PTT / mic involved —
+  firmware handles PTT itself.
+- **Settings** (RadioStore, persisted UserDefaults `aprsSettings`):
+  `aprsSymbol` (default `[`/table `/`), `aprsBeaconEnabled`,
+  `aprsBeaconIntervalMin` (default 15), `aprsBeaconFrequency`
+  (`Current`/`144.390`), `aprsPositionApprox`. `callsign` / `aprsSSID` feed
+  `AX25Callsign`.
+- **UI** — `APRSView` (list + filters + compose/reply sheets, ack
+  badges), `MapView` (`APRSMapView` shows live station pins from latest
+  position/object entry per callsign, tap → detail), `MoreView` →
+  `BeaconSettingsView` (beacon toggle, interval, frequency, approx-position,
+  symbol picker, "Beacon now").
+- **Tests** — `APRSTests.swift`, 16 tests: AX.25 round-trip vs known frame
+  bytes, callsign parse/encode, compressed/uncompressed position parse +
+  round-trip (incl. pole/date-line extremes), message/ack parse, weather
+  parse, message payload builder.
+
+Needs on-air verification at 144.390 MHz: RX decode + map pins, beacon visible
+on aprs.fi via igate, message+ack round trip with a second station,
+frequency-switch beacon restores original frequency, voice PTT unaffected.
+
+---
+
 ## Concurrency / project gotchas
 
 - The Xcode project uses **MainActor default isolation** (Swift 6.2 default for
@@ -198,4 +262,4 @@ Mic indicator:
 - CBCentralManager state restoration (`CBCentralManagerOptionRestoreIdentifierKey`)
   for system-kill recovery.
 - `.mixWithOthers` user toggle (would trade away `.shouldResume` semantics).
-- APRS map: live station annotations (placeholder data model exists in `MapView.swift`).
+- APRS digipeat and MIC-E decode (matches Android's own deferred extras).

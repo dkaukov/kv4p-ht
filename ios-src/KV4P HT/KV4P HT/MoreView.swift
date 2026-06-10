@@ -57,7 +57,7 @@ struct MoreView: View {
                         Button { showPosition = true } label: {
                             ListRow(
                                 title: "My position & beacon",
-                                value: "Off",
+                                value: store.aprsBeaconEnabled ? "On" : "Off",
                                 leading: IconTile(color: t.green, systemImage: "location.fill") as (any View),
                                 isLast: false
                             )
@@ -128,8 +128,7 @@ struct MoreView: View {
         }
         .sheet(isPresented: $showPosition) {
             NavigationStack {
-                PlaceholderView(title: "My Position & Beacon",
-                                subtitle: "GPS beacon and APRS position reporting coming in a future update.")
+                BeaconSettingsView(store: store)
             }
             .environment(\.theme, store.theme)
             .presentationDetents([.large])
@@ -578,6 +577,144 @@ struct DeviceInfoView: View {
             }
         }
         .environment(\.theme, store.theme)
+    }
+}
+
+// MARK: - Beacon settings
+
+struct BeaconSettingsView: View {
+    @Environment(\.theme) var t
+    @Environment(\.dismiss) var dismiss
+    @Bindable var store: RadioStore
+    @State private var beaconStatus: String? = nil
+
+    // Curated APRS symbols (table "/"), mirroring Android's APRSIconType subset.
+    private static let symbols: [(code: String, label: String)] = [
+        ("[", "Person"), ("-", "House"), (">", "Car"), ("b", "Bicycle"),
+        ("v", "Van"), ("k", "Truck"), ("Y", "Sailboat"), ("$", "Phone"),
+    ]
+
+    private let intervals = [5, 10, 15, 30, 60]
+    private let frequencies = ["Current", "144.390"]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 4) {
+                    ListGroupView(
+                        header: "Position beacon",
+                        footer: "Periodically transmits your GPS position via APRS. Requires a callsign in Settings. Beaconing only runs while the app is open."
+                    ) {
+                        ListRow(title: "Beacon position", isLast: false, dense: true,
+                                accessory: KVToggle(isOn: $store.aprsBeaconEnabled) as (any View))
+                        PickerRow(title: "Interval",
+                                  selection: Binding(
+                                      get: { "\(store.aprsBeaconIntervalMin) min" },
+                                      set: { store.aprsBeaconIntervalMin = Int($0.dropLast(4)) ?? 15 }),
+                                  options: intervals.map { "\($0) min" },
+                                  isLast: false)
+                        PickerRow(title: "Frequency",
+                                  selection: $store.aprsBeaconFrequency,
+                                  options: frequencies,
+                                  isLast: false)
+                        ListRow(title: "Approximate position", isLast: true, dense: true,
+                                accessory: KVToggle(isOn: $store.aprsPositionApprox) as (any View))
+                    }
+
+                    ListGroupView(header: "Map symbol") {
+                        PickerRow(title: "Symbol",
+                                  selection: Binding(
+                                      get: {
+                                          Self.symbols.first { $0.code == store.aprsSymbol }?.label
+                                              ?? Self.symbols[0].label
+                                      },
+                                      set: { label in
+                                          store.aprsSymbol = Self.symbols.first { $0.label == label }?.code ?? "["
+                                      }),
+                                  options: Self.symbols.map(\.label),
+                                  isLast: true)
+                    }
+
+                    Button {
+                        beaconStatus = "Sending…"
+                        Task {
+                            let result = await store.aprs.sendPositionBeacon()
+                            switch result {
+                            case .sent:       beaconStatus = "Beacon sent"
+                            case .noLocation: beaconStatus = "Waiting for GPS fix — try again"
+                            case .notReady:   beaconStatus = "Not connected or no callsign set"
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                            Text("Beacon now")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(t.green)
+                        .clipShape(RoundedRectangle(cornerRadius: 13))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                    if let status = beaconStatus {
+                        Text(status)
+                            .font(.system(size: 13))
+                            .foregroundStyle(t.label2)
+                            .padding(.top, 4)
+                    }
+                }
+                .padding(.bottom, 32)
+            }
+        }
+        .background(t.bg.ignoresSafeArea())
+        .navigationTitle("Position & Beacon")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("More")
+                            .font(.system(size: 17))
+                    }
+                }
+            }
+        }
+        .environment(\.theme, store.theme)
+    }
+}
+
+private struct PickerRow: View {
+    @Environment(\.theme) var t
+    var title: String
+    @Binding var selection: String
+    var options: [String]
+    var isLast: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 16.5, weight: .medium))
+                    .foregroundStyle(t.label)
+                Spacer()
+                Picker(title, selection: $selection) {
+                    ForEach(options, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .tint(t.label2)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 46)
+            if !isLast {
+                Divider().padding(.leading, 16).background(t.sep)
+            }
+        }
     }
 }
 
