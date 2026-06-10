@@ -80,6 +80,7 @@ struct APRSView: View {
                                 APRSRow(entry: entry,
                                         distanceMi: entry.distanceMi(from: store.locationManager.location),
                                         isLast: idx == filteredEntries.count - 1)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -137,6 +138,7 @@ struct APRSRow: View {
     var isLast: Bool
 
     private var kindColor: Color {
+        if entry.isOutgoing { return t.accent }
         switch entry.kind {
         case .message:  return t.accent
         case .bulletin: return t.amber
@@ -151,7 +153,7 @@ struct APRSRow: View {
         case .bulletin: return "info.circle"
         case .weather:  return "cloud.sun"
         case .object:   return "mappin.circle"
-        default:        return "location"
+        default:        return entry.isOutgoing ? "paperplane" : "location"
         }
     }
 
@@ -175,9 +177,18 @@ struct APRSRow: View {
                             .foregroundStyle(t.label)
                         if entry.isOutgoing && entry.kind == .message {
                             Image(systemName: entry.wasAcknowledged
-                                  ? "checkmark.circle.fill" : "clock")
+                                  ? "checkmark.circle.fill"
+                                  : entry.heardViaDigi != nil
+                                  ? "dot.radiowaves.up.forward" : "clock")
                                 .font(.system(size: 12))
-                                .foregroundStyle(entry.wasAcknowledged ? t.green : t.label3)
+                                .foregroundStyle(entry.wasAcknowledged
+                                                 ? t.green
+                                                 : entry.heardViaDigi != nil
+                                                 ? t.accent : t.label3)
+                        } else if entry.isOutgoing, entry.heardViaDigi != nil {
+                            Image(systemName: "dot.radiowaves.up.forward")
+                                .font(.system(size: 12))
+                                .foregroundStyle(t.accent)
                         }
                         Spacer()
                         Text(entry.time)
@@ -193,6 +204,15 @@ struct APRSRow: View {
                             .padding(.top, 1)
                     }
                     HStack(spacing: 8) {
+                        if entry.isOutgoing {
+                            Text("Sent")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(t.accent)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                         Text(entry.kind.label)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(kindColor)
@@ -273,6 +293,11 @@ struct APRSDetailView: View {
                                     Text(entry.wasAcknowledged ? "Acknowledged" : "Awaiting ack")
                                         .font(.system(size: 12, weight: .semibold))
                                         .foregroundStyle(entry.wasAcknowledged ? t.green : t.label3)
+                                }
+                                if entry.isOutgoing, let digi = entry.heardViaDigi {
+                                    Text("Heard via \(digi)")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(t.green)
                                 }
                                 Spacer()
                                 Text(entry.time)

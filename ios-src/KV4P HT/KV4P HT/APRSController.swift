@@ -31,6 +31,8 @@ struct APRSEntry: Identifiable, Codable {
     var objName: String?
     var msgNum: String?
     var wasAcknowledged: Bool = false
+    // Digipeater that repeated our outgoing packet (nil = not heard yet).
+    var heardViaDigi: String? = nil
     var isOutgoing: Bool = false
     var weather: APRSWeather?
 
@@ -60,6 +62,8 @@ class APRSController {
     private static let msgNumKey = "aprsMessageNumber"
     private static let maxEntries = 500
     private static let dedupeTTL: TimeInterval = 28
+    // Digipeats arrive within seconds of TX; window is generous for slow nets.
+    private static let heardViaDigiTTL: TimeInterval = 120
     private static let maxMessageNum = 99999
 
     private var isLoading = true
@@ -134,6 +138,13 @@ class APRSController {
         let from = frame.source.display
         let to = frame.destination.display
 
+        // Our own packet repeated back by a digipeater — don't show it as a
+        // received entry, mark the matching outgoing entry as heard instead.
+        if let me = myCallsign, frame.source.display == me.display {
+            markHeardViaDigi(info, frame: frame)
+            return
+        }
+
         // Duplicates (digipeated copies, sender retries) aren't shown again,
         // but a retry of a directed message means our ack was lost — re-ack.
         if isDuplicate {
@@ -188,6 +199,33 @@ class APRSController {
             append(APRSEntry(
                 fromCallsign: from, toCallsign: to,
                 kind: .raw, text: text, timestamp: now))
+        }
+    }
+
+    // A digipeated copy of our own packet means we were heard on RF. Mark the
+    // newest matching outgoing entry; repeats from further digis are no-ops
+    // because already-heard entries are skipped.
+    private func markHeardViaDigi(_ info: APRSInfo, frame: AX25Frame) {
+        let digi = frame.digipeaters.first(where: \.hasBeenRepeated)?.display
+            ?? "digipeater"
+        let cutoff = Date().addingTimeInterval(-Self.heardViaDigiTTL)
+        for i in entries.indices.reversed() {
+            let e = entries[i]
+            guard e.isOutgoing, e.heardViaDigi == nil, e.timestamp > cutoff
+            else { continue }
+            switch info {
+            case let .message(target, _, msgNum, _, _):
+                guard e.kind == .message || e.kind == .bulletin,
+                      callsignsMatch(e.toCallsign, target),
+                      msgNum.map { msgNumsMatch(e.msgNum, $0) } ?? (e.msgNum == nil)
+                else { continue }
+            case .position:
+                guard e.kind == .position else { continue }
+            default:
+                break
+            }
+            entries[i].heardViaDigi = digi
+            return
         }
     }
 
