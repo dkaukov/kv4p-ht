@@ -46,7 +46,19 @@ UI writes must go through `RadioModuleController` desired-state APIs. Avoid bypa
    - `lastError`
    - physical PTT flag constants
 
-4. Preserve the existing `RadioStore.sendRadioState(...)` public flow if useful, but make it a thin UI-facing wrapper around `RadioModuleController` desired-state mutations. Views and feature controllers should not call `BLEManager` to send DesiredState snapshots directly.
+4. Prefer the Android shape over a generic `sendRadioState(...)` API. Expose problem-oriented `RadioModuleController` operations/properties such as:
+   - `setTxFrequency(_:)`
+   - `setRxFrequency(_:)`
+   - `setSquelch(_:)`
+   - `setBandwidth(_:)`
+   - `setTxTone(_:)`
+   - `setRxTone(_:)`
+   - `setFilters(...)`
+   - `setHighPower(_:)`
+   - `pttDown()` / `pttUp()`
+   - `openAudio()` / `closeAudio()`
+
+   Avoid exposing a broad UI-level API that accepts a complete DesiredState snapshot. `RadioStore` may still provide user-intent helpers like `tune(to:)`, `startPtt()`, or `applyMemory(_:)`, but those helpers should call the controller's problem-oriented setters, ideally inside `beginUpdate()` / `endUpdate()` when multiple fields change together. Views and feature controllers should not call `BLEManager` to send DesiredState snapshots directly.
 
 5. On HELLO:
    - parse HELLO as `FirmwareVersion` plus initial `DeviceState`
