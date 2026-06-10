@@ -121,6 +121,38 @@ is re-registered after every rebuild.
 
 ---
 
+## Memory Edit/Delete + Per-Memory Scan Toggle (implemented 2026-06-09)
+
+`Memory` (`RadioStore.swift`) gained `scanEnabled: Bool = true`. A custom
+`init(from decoder:)` decodes it via `decodeIfPresent(...) ?? true` so memories
+saved before this field existed (UserDefaults JSON, key `savedMemories`) still
+load correctly.
+
+- **Edit/delete**: long-press a row in `MemoriesView` for a context menu
+  (Edit / Delete). `AddMemoryView` now serves both add and edit — an optional
+  `editing: Memory?` pre-fills fields and switches the title/save behavior.
+  Edit preserves the memory's `id`/`notes`/`squelch`. `RadioStore.updateMemory`
+  and `.deleteMemory` mutate `memories` (auto-persisted via existing `didSet`).
+- **Scan toggle**: edit form has an "Include in Scan" row (`ListRow` +
+  `KVToggle`, matching the Settings style). New `RadioStore.scanList` is
+  `memories.filter(\.scanEnabled)`; scan tick/index logic and the Scan tab
+  (`VoiceView` `ScanBody`) iterate `scanList` instead of `memories`.
+
+Mirrors Android's `skipDuringScan` (inverted to a positive "include" toggle).
+
+---
+
+## RX Audio Soft Limiter Fix (implemented 2026-06-09)
+
+`AudioManager.softClip` had a discontinuity at its 0.8 knee — output jumped
+0.80 → 0.61 as input crossed it. With FM voice regularly peaking 0.7–1.0, this
+modulated loud audio with audible crackle/distortion baked into the PCM before
+the volume control (lowering volume didn't help). Fixed: identity below the
+knee, tanh-compressed into `[0.8, 1.0)` above it, continuous in value and
+slope at the knee.
+
+---
+
 ## Concurrency / project gotchas
 
 - The Xcode project uses **MainActor default isolation** (Swift 6.2 default for
