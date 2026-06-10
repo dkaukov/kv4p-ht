@@ -63,11 +63,13 @@ UI writes must go through `RadioModuleController` desired-state APIs. Avoid bypa
 5. On HELLO:
    - parse HELLO as `FirmwareVersion` plus initial `DeviceState`
    - seed firmware metadata into the controller
-   - seed both applied/device state and desired state from the initial device state
-   - propagate the initial applied state to UI-visible properties immediately
+   - copy the initial `DeviceState` into the controller's applied/device state
+   - initialize desired state from that same `DeviceState` as the no-op baseline
+   - propagate the applied state to UI-visible properties immediately
+   - then apply app-required desired-state changes separately, such as `TX_ALLOWED = true`, `RX_AUDIO_OPEN = true`, and status reports enabled
    - mark transport ready
-   - send an explicit RX-audio-open desired state
-   - avoid blindly overwriting firmware config unless needed to preserve current iOS behavior
+   - let the controller detect the diff between the baseline and the app-required desired state, then emit the update
+   - avoid blindly overwriting firmware config unrelated to the app-required changes
 
 6. On each firmware `DEVICE_STATE` frame:
    - update the controller's latest device state
