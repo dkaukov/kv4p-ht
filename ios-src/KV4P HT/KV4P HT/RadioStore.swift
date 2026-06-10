@@ -215,12 +215,13 @@ class RadioStore {
         ble.onAx25Frame = { [weak self] data in
             DispatchQueue.main.async { self?.aprs.handleAx25Frame(data) }
         }
-        // Controller seeds desired state from firmware on HELLO; squelch is a
-        // user setting, so re-apply the UI value on each (re)connect.
+        // Controller seeds desired state from firmware on HELLO; copy the
+        // applied firmware config into the UI settings so the next user
+        // action doesn't overwrite firmware state with stale UI defaults.
         ble.onTransportReady = { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.radio.setSquelch(self.squelch)
+                self.hydrateUISettingsFromAppliedState()
             }
         }
         aprs.updateBeaconTimer()
@@ -257,6 +258,16 @@ class RadioStore {
             beaconFrequency: aprsBeaconFrequency, positionApprox: aprsPositionApprox)
         guard let data = try? JSONEncoder().encode(s) else { return }
         UserDefaults.standard.set(data, forKey: Self.aprsSettingsKey)
+    }
+
+    private func hydrateUISettingsFromAppliedState() {
+        guard let ds = radio.deviceState else { return }
+        squelch = ds.squelch
+        bandwidth = ds.bw == DRA818_25K ? 0 : 1
+        txPower = (ds.flags & HOST_STATE_HIGH_POWER) != 0 ? "5 W" : "1 W"
+        filterPreemphasis = (ds.flags & HOST_STATE_FILTER_PRE) != 0
+        filterHighPass = (ds.flags & HOST_STATE_FILTER_HIGH) != 0
+        filterLowPass = (ds.flags & HOST_STATE_FILTER_LOW) != 0
     }
 
     private func configureSpeechManager() {
@@ -318,11 +329,24 @@ class RadioStore {
         ble.deviceState?.rssi ?? 0
     }
 
+    // Applied TX offset from firmware state; preserves split TX/RX config
+    // that has no matching memory.
+    var currentTxOffset: Float {
+        guard let ds = ble.deviceState else { return 0 }
+        return ds.freqTx - ds.freqRx
+    }
+
+    var currentOffsetString: String {
+        let offset = currentTxOffset
+        if abs(offset) < 0.0005 { return "Simplex" }
+        return offset > 0 ? String(format: "+%.3f", offset) : String(format: "%.3f", offset)
+    }
+
     var rxMode: RadioRxState {
         guard let ds = ble.deviceState else { return .idle }
         switch ds.mode {
         case 0: return .tx
-        case 1: return .rx
+        case 1: return (ds.flags & DEVICE_STATE_SQUELCHED) == 0 ? .rx : .idle
         default: return .idle
         }
     }
@@ -437,7 +461,9 @@ class RadioStore {
     func sendRadioState(freq: Float? = nil, ptt: Bool = false) {
         let rxFreq = freq ?? currentFreq
         let mem = memory(for: rxFreq)
-        let txFreq = mem.map { rxFreq + $0.offset } ?? rxFreq
+        // No matching memory: keep the firmware-applied TX offset instead of
+        // collapsing split TX/RX back to simplex.
+        let txFreq = mem.map { rxFreq + $0.offset } ?? (rxFreq + currentTxOffset)
         let tone = mem.map { ctcssIndex(for: $0.plTone) } ?? 0
         radio.beginUpdate()
         radio.setTxFrequency(txFreq)
@@ -581,7 +607,7 @@ enum RadioRxState {
     case idle, rx, tx
     var label: String {
         switch self {
-        case .idle: return "MONITOR"
+        case .idle: return "IDLE"
         case .rx:   return "RECEIVING"
         case .tx:   return "TRANSMIT"
         }

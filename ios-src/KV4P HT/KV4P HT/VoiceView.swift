@@ -95,7 +95,7 @@ private struct SimplexBody: View {
             name:   matched?.name ?? store.currentFreqString,
             desc:   matched?.notes ?? "",
             freq:   store.currentFreqString,
-            offset: "Simplex",
+            offset: matched?.offsetString ?? store.currentOffsetString,
             tone:   matched?.toneString ?? "Off"
         )
     }
@@ -157,13 +157,18 @@ private struct RadioStage: View {
     @State private var stickyPttActive = false
     @State private var showNumpad = false
 
+    // Applied state (firmware DeviceState) drives the badge, frequency color,
+    // and S-meter; local request state only drives the PTT button visual.
     private var rxState: RadioRxState {
-        if store.stickyPTT && stickyPttActive { return .tx }
-        return pttDown ? .tx : store.rxMode
+        store.rxMode
     }
 
-    private var pttActive: Bool {
+    private var pttRequested: Bool {
         pttDown || (store.stickyPTT && stickyPttActive)
+    }
+
+    private var txApplied: Bool {
+        store.rxMode == .tx
     }
 
     var body: some View {
@@ -171,7 +176,7 @@ private struct RadioStage: View {
             // Mode chip
             HStack(spacing: 6) {
                 Circle()
-                    .fill(pttActive ? t.red : t.accent)
+                    .fill(txApplied ? t.red : t.accent)
                     .frame(width: 6, height: 6)
                 Text(modeLabel)
                     .font(.system(size: 12.5, weight: .bold))
@@ -189,11 +194,11 @@ private struct RadioStage: View {
             Group {
                 if freqEditable {
                     Button { showNumpad = true } label: {
-                        FreqReadout(freq: freq, tx: pttActive)
+                        FreqReadout(freq: freq, state: rxState)
                     }
                     .buttonStyle(.plain)
                 } else {
-                    FreqReadout(freq: freq, tx: pttActive)
+                    FreqReadout(freq: freq, state: rxState)
                 }
             }
             .padding(.top, 6)
@@ -211,7 +216,7 @@ private struct RadioStage: View {
 
             // S-meter + badge
             HStack(spacing: 14) {
-                SMeter(level: pttActive ? 0 : store.signalLevel, active: !pttActive, rawRSSI: store.rawRSSI)
+                SMeter(level: txApplied ? 0 : store.signalLevel, active: !txApplied, rawRSSI: store.rawRSSI)
                 RxBadge(state: rxState)
             }
             .padding(.top, 8)
@@ -460,14 +465,22 @@ struct FreqReadout: View {
     @Environment(\.theme) var t
     var freq: String
     var size: CGFloat = 74
-    var tx: Bool = false
+    var state: RadioRxState = .idle
+
+    private var color: Color {
+        switch state {
+        case .tx:   return t.red
+        case .rx:   return t.green
+        case .idle: return t.label
+        }
+    }
 
     var body: some View {
         HStack(alignment: .lastTextBaseline, spacing: 6) {
             Text(freq)
                 .font(.system(size: size, weight: .bold, design: .default).monospacedDigit())
                 .tracking(-1.5)
-                .foregroundStyle(tx ? t.red : t.label)
+                .foregroundStyle(color)
             Text("MHz")
                 .font(.system(size: size * 0.27, weight: .semibold))
                 .foregroundStyle(t.label2)
