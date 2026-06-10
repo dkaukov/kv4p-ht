@@ -376,6 +376,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private func log(_ msg: String) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         let entry = "[\(ts)] \(msg)"
+        print("[BLE] \(entry)")
         pendingLogEntries.append(entry)
         guard !logFlushScheduled else { return }
         logFlushScheduled = true

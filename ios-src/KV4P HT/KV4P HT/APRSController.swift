@@ -124,15 +124,26 @@ class APRSController {
         let dedupeKey = frame.source.display + "|" + frame.destination.display + "|"
             + frame.payload.base64EncodedString()
         let now = Date()
-        if let then = dedupeCache[dedupeKey], now.timeIntervalSince(then) < Self.dedupeTTL {
-            return
-        }
+        let isDuplicate = dedupeCache[dedupeKey].map {
+            now.timeIntervalSince($0) < Self.dedupeTTL
+        } ?? false
         dedupeCache = dedupeCache.filter { now.timeIntervalSince($0.value) < Self.dedupeTTL }
         dedupeCache[dedupeKey] = now
 
         let info = parseAPRSPayload(frame.payload)
         let from = frame.source.display
         let to = frame.destination.display
+
+        // Duplicates (digipeated copies, sender retries) aren't shown again,
+        // but a retry of a directed message means our ack was lost — re-ack.
+        if isDuplicate {
+            if case let .message(target, _, msgNum, isAck, isRej) = info,
+               !isAck, !isRej, !target.hasPrefix("BLN"),
+               isAddressedToMe(target), let num = msgNum {
+                scheduleAck(to: from, msgNum: num)
+            }
+            return
+        }
 
         switch info {
         case let .position(lat, lon, table, code, comment, weather):
@@ -157,7 +168,7 @@ class APRSController {
                 kind: kind, text: body, timestamp: now, msgNum: msgNum))
             // Auto-ack directed messages that carry a message number.
             if kind == .message, isAddressedToMe(target), let num = msgNum {
-                sendAck(to: from, msgNum: num)
+                scheduleAck(to: from, msgNum: num)
             }
 
         case let .object(name, lat, lon, comment):
@@ -183,11 +194,29 @@ class APRSController {
     private func markAcknowledged(msgNum: String, by callsign: String, rejected: Bool) {
         guard !rejected else { return }
         for i in entries.indices.reversed()
-        where entries[i].isOutgoing && entries[i].msgNum == msgNum
-            && entries[i].toCallsign == callsign && !entries[i].wasAcknowledged {
+        where entries[i].isOutgoing && !entries[i].wasAcknowledged
+            && msgNumsMatch(entries[i].msgNum, msgNum)
+            && callsignsMatch(entries[i].toCallsign, callsign) {
             entries[i].wasAcknowledged = true
             return
         }
+    }
+
+    // Exact display match, or same base callsign (acks may come back with a
+    // different SSID than the one we addressed).
+    private func callsignsMatch(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        func base(_ s: String) -> Substring { s.split(separator: "-", maxSplits: 1).first ?? Substring(s) }
+        return base(a) == base(b)
+    }
+
+    // String equality after trimming, or numeric equality ("012" acks "12").
+    private func msgNumsMatch(_ a: String?, _ b: String) -> Bool {
+        guard let a = a?.trimmingCharacters(in: .whitespaces) else { return false }
+        let b = b.trimmingCharacters(in: .whitespaces)
+        if a == b { return true }
+        if let ai = Int(a), let bi = Int(b) { return ai == bi }
+        return false
     }
 
     // MARK: - TX
@@ -206,6 +235,15 @@ class APRSController {
         let frame = AX25Frame(source: me, payload: Data(payload.utf8))
         store.ble.sendAx25Frame(frame.encodedWithoutFCS())
         return true
+    }
+
+    // Delay before acking (matches Android) so we don't key up while
+    // digipeated copies of the message are still on the air.
+    private func scheduleAck(to: String, msgNum: String) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            self?.sendAck(to: to, msgNum: msgNum)
+        }
     }
 
     private func sendAck(to: String, msgNum: String) {

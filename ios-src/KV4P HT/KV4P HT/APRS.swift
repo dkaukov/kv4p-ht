@@ -189,13 +189,27 @@ private func parseMessagePayload(_ text: String) -> APRSInfo? {
         body = String(body[..<braceIdx])
     }
     let lc = body.lowercased()
-    if lc.hasPrefix("ack"), body.count > 3 {
-        return .message(to: to, body: "ack", msgNum: String(body.dropFirst(3)), isAck: true, isRej: false)
+    if lc.hasPrefix("ack"), let num = ackMsgNum(body) {
+        return .message(to: to, body: "ack", msgNum: num, isAck: true, isRej: false)
     }
-    if lc.hasPrefix("rej"), body.count > 3 {
-        return .message(to: to, body: "rej", msgNum: String(body.dropFirst(3)), isAck: false, isRej: true)
+    if lc.hasPrefix("rej"), let num = ackMsgNum(body) {
+        return .message(to: to, body: "rej", msgNum: num, isAck: false, isRej: true)
     }
     return .message(to: to, body: body, msgNum: msgNum, isAck: false, isRej: false)
+}
+
+// Per spec an ack/rej body is exactly "ack"/"rej" + 1–5 alphanumeric chars,
+// optionally followed by a reply-ack suffix ("}" + our msgNum). Anything else
+// is ordinary message text (e.g. "acknowledged, see you at 7").
+private func ackMsgNum(_ body: String) -> String? {
+    var num = String(body.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+    if let brace = num.firstIndex(of: "}") {
+        num = String(num[..<brace])
+    }
+    guard (1...5).contains(num.count),
+          num.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) })
+    else { return nil }
+    return num
 }
 
 // MARK: - Object
