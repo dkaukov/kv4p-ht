@@ -187,3 +187,88 @@ struct APRSParseTests {
         #expect(built.count == 1 + 9 + 1 + 67)
     }
 }
+
+// MARK: - RX pipeline / persistence
+
+struct APRSPipelineTests {
+
+    // Tests run in parallel; isolate each controller's UserDefaults so the
+    // legacy-migration blob can't leak between tests via .standard.
+    private func freshDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "test-" + UUID().uuidString)!
+    }
+
+    private func makeController(_ persistence: APRSPersistence,
+                                defaults: UserDefaults? = nil) -> APRSController {
+        APRSController(persistence: persistence, defaults: defaults ?? freshDefaults())
+    }
+
+    private func frameBytes(from: String, payload: String) -> Data {
+        AX25Frame(destination: AX25Callsign(base: "APKVPA", ssid: 0),
+                  source: AX25Callsign(parsing: from)!,
+                  digipeaters: [], payload: Data(payload.utf8))
+            .encodedWithoutFCS()
+    }
+
+    @Test func duplicateDirectedMessageAppendsOnce() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        let frame = frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42")
+        controller.handleAx25Frame(frame)
+        controller.handleAx25Frame(frame)   // sender retry
+        #expect(controller.entries.count == 1)
+    }
+
+    @Test func historySurvivesRestart() {
+        let persistence = APRSPersistence(inMemory: true)
+        let first = makeController(persistence)
+        first.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42"))
+        #expect(first.entries.count == 1)
+
+        // Same store, fresh controller = app relaunch.
+        let second = makeController(persistence)
+        #expect(second.entries.count == 1)
+        #expect(second.entries.first?.text == "hello")
+        #expect(second.entries.first?.msgNum == "42")
+    }
+
+    @Test func messageDedupeSurvivesRestart() {
+        let persistence = APRSPersistence(inMemory: true)
+        let frame = frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42")
+        makeController(persistence).handleAx25Frame(frame)
+
+        let relaunched = makeController(persistence)
+        relaunched.handleAx25Frame(frame)   // retry after relaunch
+        #expect(relaunched.entries.count == 1)
+    }
+
+    @Test func shortWindowDoesNotSuppressDistinctPackets() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: "!3449.94N/08448.56W-a"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: "!3449.94N/08448.56W-b"))
+        #expect(controller.entries.count == 2)
+    }
+
+    @Test func ackStatePersistsAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.isOutgoing = true
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.markEntryAcknowledged(id: outgoing.id)
+
+        let reloaded = persistence.loadEntries(max: 10)
+        #expect(reloaded.count == 1)
+        #expect(reloaded.first?.wasAcknowledged == true)
+    }
+
+    @Test func legacyUserDefaultsBlobMigrates() throws {
+        let defaults = freshDefaults()
+        let entry = APRSEntry(fromCallsign: "N0CALL", toCallsign: "KC4ABC",
+                              kind: .message, text: "old history", timestamp: Date())
+        defaults.set(try JSONEncoder().encode([entry]), forKey: "aprsEntries")
+
+        let controller = makeController(APRSPersistence(inMemory: true), defaults: defaults)
+        #expect(controller.entries.contains { $0.text == "old history" })
+        #expect(defaults.data(forKey: "aprsEntries") == nil)
+    }
+}

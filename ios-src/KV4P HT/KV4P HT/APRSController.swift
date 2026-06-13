@@ -58,50 +58,53 @@ struct APRSEntry: Identifiable, Codable {
 class APRSController {
     @ObservationIgnored weak var store: RadioStore?
 
-    private static let entriesKey = "aprsEntries"
+    private static let legacyEntriesKey = "aprsEntries"
     private static let msgNumKey = "aprsMessageNumber"
     private static let maxEntries = 500
-    private static let dedupeTTL: TimeInterval = 28
+    // Exact-duplicate suppression for digipeated copies of any packet.
+    private static let frameDedupeWindow: TimeInterval = 30
+    // Directed-message dedupe/re-ack window. Long and restart-proof: a sender
+    // retrying an unacked message minutes later (or after we relaunch) must be
+    // re-acked without a duplicate visible entry.
+    private static let messageDedupeWindow: TimeInterval = 30 * 60
+    private static let frameRetention: TimeInterval = 24 * 60 * 60
     // Digipeats arrive within seconds of TX; window is generous for slow nets.
     private static let heardViaDigiTTL: TimeInterval = 120
     private static let maxMessageNum = 99999
 
-    private var isLoading = true
-    var entries: [APRSEntry] = [] {
-        didSet { if !isLoading { saveEntries() } }
-    }
+    var entries: [APRSEntry] = []
 
-    @ObservationIgnored private var dedupeCache: [String: Date] = [:]
+    @ObservationIgnored private let persistence: APRSPersistence
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var beaconTimer: Timer?
     @ObservationIgnored private var messageNumber: Int
 
-    init() {
-        messageNumber = UserDefaults.standard.object(forKey: Self.msgNumKey) as? Int
+    init(persistence: APRSPersistence = APRSPersistence(),
+         defaults: UserDefaults = .standard) {
+        self.persistence = persistence
+        self.defaults = defaults
+        messageNumber = defaults.object(forKey: Self.msgNumKey) as? Int
             ?? Int.random(in: 0...Self.maxMessageNum)
-        if let data = UserDefaults.standard.data(forKey: Self.entriesKey),
-           let decoded = try? JSONDecoder().decode([APRSEntry].self, from: data) {
-            entries = decoded
+        // One-shot migration of the pre-Core Data UserDefaults history blob.
+        if let data = defaults.data(forKey: Self.legacyEntriesKey) {
+            persistence.migrateLegacyEntries(data)
+            defaults.removeObject(forKey: Self.legacyEntriesKey)
         }
-        isLoading = false
+        entries = persistence.loadEntries(max: Self.maxEntries)
     }
 
-    private func saveEntries() {
-        let snapshot = entries
-        DispatchQueue.global(qos: .background).async {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            UserDefaults.standard.set(data, forKey: Self.entriesKey)
-        }
-    }
-
-    private func append(_ entry: APRSEntry) {
+    private func append(_ entry: APRSEntry, frameHash: String? = nil) {
         entries.append(entry)
+        persistence.insertEntry(entry, frameHash: frameHash)
         if entries.count > Self.maxEntries {
             entries.removeFirst(entries.count - Self.maxEntries)
+            persistence.trimEntries(max: Self.maxEntries)
         }
     }
 
     func clearAll() {
         entries.removeAll()
+        persistence.deleteAllEntries()
     }
 
     // MARK: - My station
@@ -122,21 +125,38 @@ class APRSController {
 
     // MARK: - RX
 
+    // RX pipeline: decode identity → persist the frame → classify → side
+    // effects. The persistent frame store, not an in-memory cache, decides
+    // what counts as a duplicate, so dedupe and re-ack survive app restarts.
     func handleAx25Frame(_ data: Data) {
         guard let frame = AX25Frame(decoding: data) else { return }
 
-        let dedupeKey = frame.source.display + "|" + frame.destination.display + "|"
-            + frame.payload.base64EncodedString()
         let now = Date()
-        let isDuplicate = dedupeCache[dedupeKey].map {
-            now.timeIntervalSince($0) < Self.dedupeTTL
-        } ?? false
-        dedupeCache = dedupeCache.filter { now.timeIntervalSince($0.value) < Self.dedupeTTL }
-        dedupeCache[dedupeKey] = now
-
-        let info = parseAPRSPayload(frame.payload)
         let from = frame.source.display
         let to = frame.destination.display
+        let info = parseAPRSPayload(frame.payload)
+        let (frameKind, frameMsgNum) = Self.frameIdentity(of: info)
+
+        // Directed messages get the long window: a sender retry means our ack
+        // was lost and we must re-ack, even across an app restart. Everything
+        // else (positions, bulletins, acks) only needs digipeat suppression.
+        var isDirectedMessage = false
+        if case let .message(target, _, msgNum, isAck, isRej) = info,
+           !isAck, !isRej, !target.hasPrefix("BLN"), msgNum != nil {
+            isDirectedMessage = true
+        }
+        let window = isDirectedMessage ? Self.messageDedupeWindow : Self.frameDedupeWindow
+        let isDuplicate = persistence.recentIncomingFrameExists(
+            source: from, payload: frame.payload,
+            since: now.addingTimeInterval(-window))
+
+        // Persist before any side effects.
+        let frameHash = APRSPersistence.frameHash(of: data)
+        persistence.insertFrame(
+            direction: "in", raw: data, frameHash: frameHash,
+            source: from, destination: to, payload: frame.payload,
+            kind: frameKind, msgNum: frameMsgNum, timestamp: now)
+        persistence.pruneFrames(olderThan: now.addingTimeInterval(-Self.frameRetention))
 
         // Our own packet repeated back by a digipeater — don't show it as a
         // received entry, mark the matching outgoing entry as heard instead.
@@ -164,7 +184,7 @@ class APRSController {
                 text: weather?.summary ?? comment,
                 timestamp: now, lat: lat, lon: lon,
                 symbolTable: String(table), symbolCode: String(code),
-                weather: weather))
+                weather: weather), frameHash: frameHash)
 
         case let .message(target, body, msgNum, isAck, isRej):
             if isAck || isRej {
@@ -176,7 +196,8 @@ class APRSController {
             let kind: APRSPacketKind = target.hasPrefix("BLN") ? .bulletin : .message
             append(APRSEntry(
                 fromCallsign: from, toCallsign: target,
-                kind: kind, text: body, timestamp: now, msgNum: msgNum))
+                kind: kind, text: body, timestamp: now, msgNum: msgNum),
+                frameHash: frameHash)
             // Auto-ack directed messages that carry a message number.
             if kind == .message, isAddressedToMe(target), let num = msgNum {
                 scheduleAck(to: from, msgNum: num)
@@ -186,19 +207,31 @@ class APRSController {
             append(APRSEntry(
                 fromCallsign: from, toCallsign: to,
                 kind: .object, text: comment.isEmpty ? name : "\(name): \(comment)",
-                timestamp: now, lat: lat, lon: lon, objName: name))
+                timestamp: now, lat: lat, lon: lon, objName: name), frameHash: frameHash)
 
         case let .weather(wx, comment):
             append(APRSEntry(
                 fromCallsign: from, toCallsign: to,
                 kind: .weather, text: wx.summary.isEmpty ? comment : wx.summary,
-                timestamp: now, weather: wx))
+                timestamp: now, weather: wx), frameHash: frameHash)
 
         case let .raw(text):
             guard !text.isEmpty else { return }
             append(APRSEntry(
                 fromCallsign: from, toCallsign: to,
-                kind: .raw, text: text, timestamp: now))
+                kind: .raw, text: text, timestamp: now), frameHash: frameHash)
+        }
+    }
+
+    // Minimal parsed identity stored alongside the raw frame.
+    private static func frameIdentity(of info: APRSInfo) -> (kind: String?, msgNum: String?) {
+        switch info {
+        case let .message(_, _, msgNum, isAck, isRej):
+            return (isAck ? "ack" : isRej ? "rej" : "message", msgNum)
+        case .position: return ("position", nil)
+        case .object:   return ("object", nil)
+        case .weather:  return ("weather", nil)
+        case .raw:      return ("raw", nil)
         }
     }
 
@@ -236,6 +269,7 @@ class APRSController {
             && msgNumsMatch(entries[i].msgNum, msgNum)
             && callsignsMatch(entries[i].toCallsign, callsign) {
             entries[i].wasAcknowledged = true
+            persistence.markEntryAcknowledged(id: entries[i].id)
             return
         }
     }
@@ -270,7 +304,14 @@ class APRSController {
         // Firmware gates AX.25 TX on the TX_ALLOWED desired-state flag, which
         // RadioModuleController keeps set after HELLO — no refresh needed.
         let frame = AX25Frame(source: me, payload: Data(payload.utf8))
-        store.ble.sendAx25Frame(frame.encodedWithoutFCS())
+        let raw = frame.encodedWithoutFCS()
+        store.ble.sendAx25Frame(raw)
+        let info = parseAPRSPayload(frame.payload)
+        let (kind, msgNum) = Self.frameIdentity(of: info)
+        persistence.insertFrame(
+            direction: "out", raw: raw, frameHash: APRSPersistence.frameHash(of: raw),
+            source: me.display, destination: frame.destination.display,
+            payload: frame.payload, kind: kind, msgNum: msgNum, timestamp: Date())
         return true
     }
 
@@ -303,7 +344,7 @@ class APRSController {
         if messageNumber > Self.maxMessageNum { messageNumber = 0 }
         let num = String(messageNumber)
         messageNumber += 1
-        UserDefaults.standard.set(messageNumber, forKey: Self.msgNumKey)
+        defaults.set(messageNumber, forKey: Self.msgNumKey)
 
         guard transmitPayload(messagePayload(to: target, text: outText, msgNum: num))
         else { return false }
