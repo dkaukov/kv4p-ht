@@ -7,8 +7,7 @@ struct APRSView: View {
     @Bindable var store: RadioStore
     @State private var selectedEntry: APRSEntry? = nil
     @State private var searchText = ""
-    @State private var showCompose = false
-    @State private var composeTo = ""
+    @State private var composeTarget: ComposeTarget?
 
     private let filters = ["All", "Messages", "Bulletins", "Positions", "Weather"]
 
@@ -97,8 +96,7 @@ struct APRSView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
-                    composeTo = ""
-                    showCompose = true
+                    composeTarget = ComposeTarget(callsign: "")
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 16, weight: .semibold))
@@ -110,23 +108,30 @@ struct APRSView: View {
             NavigationStack {
                 APRSDetailView(store: store, entry: entry) { replyTo in
                     selectedEntry = nil
-                    composeTo = replyTo
-                    showCompose = true
+                    composeTarget = ComposeTarget(callsign: replyTo)
                 }
             }
             .environment(\.theme, store.theme)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showCompose) {
+        .sheet(item: $composeTarget) { target in
             NavigationStack {
-                APRSComposeView(store: store, toCallsign: composeTo)
+                APRSComposeView(store: store, toCallsign: target.callsign)
             }
             .environment(\.theme, store.theme)
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
     }
+}
+
+// Identifiable wrapper so the compose sheet is presented with `.sheet(item:)`,
+// giving the view fresh identity per presentation — without this the compose
+// view's @State recipient is seeded only once and Reply never pre-fills.
+private struct ComposeTarget: Identifiable {
+    let id = UUID()
+    var callsign: String
 }
 
 // MARK: - APRS Row
