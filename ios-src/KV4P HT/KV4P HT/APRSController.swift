@@ -258,6 +258,7 @@ class APRSController {
                 break
             }
             entries[i].heardViaDigi = digi
+            persistence.markEntryHeardViaDigi(id: entries[i].id, digi: digi)
             return
         }
     }

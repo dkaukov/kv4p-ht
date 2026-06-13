@@ -92,6 +92,7 @@ final class APRSPersistence {
             attr("objName", .stringAttributeType, optional: true),
             attr("msgNum", .stringAttributeType, optional: true),
             attr("wasAcknowledged", .booleanAttributeType),
+            attr("heardViaDigi", .stringAttributeType, optional: true),
             attr("isOutgoing", .booleanAttributeType),
             attr("weatherData", .binaryDataAttributeType, optional: true),
             attr("frameHash", .stringAttributeType, optional: true),
@@ -185,6 +186,7 @@ final class APRSPersistence {
                 msgNum: row.value(forKey: "msgNum") as? String)
             e.id = id
             e.wasAcknowledged = row.value(forKey: "wasAcknowledged") as? Bool ?? false
+            e.heardViaDigi = row.value(forKey: "heardViaDigi") as? String
             e.isOutgoing = row.value(forKey: "isOutgoing") as? Bool ?? false
             if let wxData = row.value(forKey: "weatherData") as? Data {
                 e.weather = try? JSONDecoder().decode(APRSWeather.self, from: wxData)
@@ -208,6 +210,7 @@ final class APRSPersistence {
         row.setValue(entry.objName, forKey: "objName")
         row.setValue(entry.msgNum, forKey: "msgNum")
         row.setValue(entry.wasAcknowledged, forKey: "wasAcknowledged")
+        row.setValue(entry.heardViaDigi, forKey: "heardViaDigi")
         row.setValue(entry.isOutgoing, forKey: "isOutgoing")
         row.setValue(entry.weather.flatMap { try? JSONEncoder().encode($0) }, forKey: "weatherData")
         row.setValue(frameHash, forKey: "frameHash")
@@ -217,6 +220,12 @@ final class APRSPersistence {
     func markEntryAcknowledged(id: UUID) {
         guard let row = fetchEntry(id: id) else { return }
         row.setValue(true, forKey: "wasAcknowledged")
+        save()
+    }
+
+    func markEntryHeardViaDigi(id: UUID, digi: String) {
+        guard let row = fetchEntry(id: id) else { return }
+        row.setValue(digi, forKey: "heardViaDigi")
         save()
     }
 
