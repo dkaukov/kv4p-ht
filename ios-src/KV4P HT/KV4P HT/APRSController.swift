@@ -132,9 +132,20 @@ class APRSController {
         guard let frame = AX25Frame(decoding: data) else { return }
 
         let now = Date()
-        let from = frame.source.display
-        let to = frame.destination.display
-        let info = parseAPRSPayload(frame.payload)
+        var from = frame.source.display
+        var to = frame.destination.display
+        var info = parseAPRSPayload(frame.payload)
+
+        // Third-party relayed traffic (} DTI): the real originator is the inner
+        // packet's source, not the RF-carrying station. Unwrap so the message
+        // shows as from the originator and auto-ack targets them, not the
+        // gateway. (Ported from Android Parser.java case '}'.)
+        if let tp = Self.unwrapThirdParty(frame.payload) {
+            from = tp.source
+            to = tp.destination
+            info = parseAPRSPayload(tp.info)
+        }
+
         let (frameKind, frameMsgNum) = Self.frameIdentity(of: info)
 
         // Directed messages get the long window: a sender retry means our ack
@@ -233,6 +244,30 @@ class APRSController {
         case .weather:  return ("weather", nil)
         case .raw:      return ("raw", nil)
         }
+    }
+
+    // Unwraps a third-party relayed payload (DTI '}') into the inner packet's
+    // source callsign, destination (tocall), and info field. Inner wire format
+    // is TNC2: "SRC>DEST,PATH:infofield". Returns nil if the payload isn't
+    // third-party or is malformed.
+    static func unwrapThirdParty(_ payload: Data) -> (source: String, destination: String, info: Data)? {
+        guard let text = String(data: payload, encoding: .utf8)
+                ?? String(data: payload, encoding: .isoLatin1),
+              text.first == "}" else { return nil }
+        let inner = text.dropFirst()                       // strip '}'
+        guard let gt = inner.firstIndex(of: ">") else { return nil }
+        let source = String(inner[inner.startIndex..<gt])
+        guard !source.isEmpty else { return nil }
+        let afterSource = inner[inner.index(after: gt)...]  // "DEST,PATH:info..."
+        guard let colon = afterSource.firstIndex(of: ":") else { return nil }
+        let header = afterSource[afterSource.startIndex..<colon]  // "DEST,PATH"
+        let dest = header.split(separator: ",").first.map(String.init) ?? ""
+        let infoStr = String(afterSource[colon...])         // includes leading ':'
+        guard !infoStr.isEmpty, let infoData = infoStr.data(using: .utf8)
+        else { return nil }
+        // Trailing '*' on a digipeated callsign isn't part of the name.
+        let cleanDest = dest.hasSuffix("*") ? String(dest.dropLast()) : dest
+        return (source.uppercased(), cleanDest.uppercased(), infoData)
     }
 
     // A digipeated copy of our own packet means we were heard on RF. Mark the

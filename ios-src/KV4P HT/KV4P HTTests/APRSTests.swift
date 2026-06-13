@@ -135,6 +135,28 @@ struct APRSParseTests {
         #expect(!isAck)
     }
 
+    @Test func thirdPartyUnwrapMessage() throws {
+        // Real packet: aprs.fi message to W9VFR-9 gated to RF by W9VFR-1.
+        let payload = Data("}W9VFR-4>APFII0,TCPIP,W9VFR-1*::W9VFR-9  :SYN{80F32".utf8)
+        let tp = try #require(APRSController.unwrapThirdParty(payload))
+        #expect(tp.source == "W9VFR-4")
+        #expect(tp.destination == "APFII0")
+
+        guard case let .message(to, body, msgNum, isAck, _) = parseAPRSPayload(tp.info) else {
+            Issue.record("expected message, got \(parseAPRSPayload(tp.info))")
+            return
+        }
+        #expect(to == "W9VFR-9")
+        #expect(body == "SYN")
+        #expect(msgNum == "80F32")
+        #expect(!isAck)
+    }
+
+    @Test func nonThirdPartyReturnsNil() {
+        #expect(APRSController.unwrapThirdParty(Data(":N0CALL   :hi{1".utf8)) == nil)
+        #expect(APRSController.unwrapThirdParty(Data("}garbage-no-colon".utf8)) == nil)
+    }
+
     @Test func ackMessage() throws {
         let info = parseAPRSPayload(Data(":N0CALL-9 :ack42".utf8))
         guard case let .message(to, _, msgNum, isAck, _) = info else {
