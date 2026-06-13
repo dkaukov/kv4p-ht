@@ -262,7 +262,9 @@ class APRSController {
         guard let colon = afterSource.firstIndex(of: ":") else { return nil }
         let header = afterSource[afterSource.startIndex..<colon]  // "DEST,PATH"
         let dest = header.split(separator: ",").first.map(String.init) ?? ""
-        let infoStr = String(afterSource[colon...])         // includes leading ':'
+        // Drop the TNC2 header/info separator colon; the info field keeps its
+        // own DTI (e.g. ':' for a message, '!' for a position).
+        let infoStr = String(afterSource[afterSource.index(after: colon)...])
         guard !infoStr.isEmpty, let infoData = infoStr.data(using: .utf8)
         else { return nil }
         // Trailing '*' on a digipeated callsign isn't part of the name.
