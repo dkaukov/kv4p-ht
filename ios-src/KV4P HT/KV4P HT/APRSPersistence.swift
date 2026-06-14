@@ -93,6 +93,8 @@ final class APRSPersistence {
             attr("msgNum", .stringAttributeType, optional: true),
             attr("wasAcknowledged", .booleanAttributeType),
             attr("heardViaDigi", .stringAttributeType, optional: true),
+            attr("retryCount", .integer64AttributeType),
+            attr("nextRetryAt", .dateAttributeType, optional: true),
             attr("isOutgoing", .booleanAttributeType),
             attr("weatherData", .binaryDataAttributeType, optional: true),
             attr("frameHash", .stringAttributeType, optional: true),
@@ -187,6 +189,8 @@ final class APRSPersistence {
             e.id = id
             e.wasAcknowledged = row.value(forKey: "wasAcknowledged") as? Bool ?? false
             e.heardViaDigi = row.value(forKey: "heardViaDigi") as? String
+            e.retryCount = row.value(forKey: "retryCount") as? Int ?? 0
+            e.nextRetryAt = row.value(forKey: "nextRetryAt") as? Date
             e.isOutgoing = row.value(forKey: "isOutgoing") as? Bool ?? false
             if let wxData = row.value(forKey: "weatherData") as? Data {
                 e.weather = try? JSONDecoder().decode(APRSWeather.self, from: wxData)
@@ -211,6 +215,8 @@ final class APRSPersistence {
         row.setValue(entry.msgNum, forKey: "msgNum")
         row.setValue(entry.wasAcknowledged, forKey: "wasAcknowledged")
         row.setValue(entry.heardViaDigi, forKey: "heardViaDigi")
+        row.setValue(entry.retryCount, forKey: "retryCount")
+        row.setValue(entry.nextRetryAt, forKey: "nextRetryAt")
         row.setValue(entry.isOutgoing, forKey: "isOutgoing")
         row.setValue(entry.weather.flatMap { try? JSONEncoder().encode($0) }, forKey: "weatherData")
         row.setValue(frameHash, forKey: "frameHash")
@@ -220,6 +226,14 @@ final class APRSPersistence {
     func markEntryAcknowledged(id: UUID) {
         guard let row = fetchEntry(id: id) else { return }
         row.setValue(true, forKey: "wasAcknowledged")
+        row.setValue(nil, forKey: "nextRetryAt")   // a late ACK stops retries
+        save()
+    }
+
+    func updateEntryRetry(id: UUID, retryCount: Int, nextRetryAt: Date?) {
+        guard let row = fetchEntry(id: id) else { return }
+        row.setValue(retryCount, forKey: "retryCount")
+        row.setValue(nextRetryAt, forKey: "nextRetryAt")
         save()
     }
 

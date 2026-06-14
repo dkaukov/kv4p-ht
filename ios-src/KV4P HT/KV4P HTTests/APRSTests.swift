@@ -293,4 +293,56 @@ struct APRSPipelineTests {
         #expect(controller.entries.contains { $0.text == "old history" })
         #expect(defaults.data(forKey: "aprsEntries") == nil)
     }
+
+    // MARK: - Message retry (decay algorithm)
+
+    @Test func retryIntervalDecaysAndCaps() {
+        #expect(APRSController.retryInterval(forAttempt: 0) == 8)
+        #expect(APRSController.retryInterval(forAttempt: 1) == 16)
+        #expect(APRSController.retryInterval(forAttempt: 2) == 32)
+        #expect(APRSController.retryInterval(forAttempt: 6) == 512)
+        #expect(APRSController.retryInterval(forAttempt: 30) == 20 * 60)  // capped
+    }
+
+    @Test func retryStateAdvancesThenGivesUp() {
+        let now = Date()
+        // Mid-sequence: schedule the next retry.
+        let mid = APRSController.nextRetryState(retryCount: 0, now: now)
+        #expect(mid.retryCount == 1)
+        #expect(mid.nextRetryAt == now.addingTimeInterval(16))
+        // Final attempt exhausts the budget → undelivered (nil).
+        let last = APRSController.nextRetryState(retryCount: APRSController.maxRetries - 1, now: now)
+        #expect(last.retryCount == APRSController.maxRetries)
+        #expect(last.nextRetryAt == nil)
+    }
+
+    @Test func ackClearsPendingRetryAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.nextRetryAt = Date().addingTimeInterval(8)
+        outgoing.isOutgoing = true
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.markEntryAcknowledged(id: outgoing.id)
+
+        let e = persistence.loadEntries(max: 10).first
+        #expect(e?.wasAcknowledged == true)
+        #expect(e?.nextRetryAt == nil)
+        #expect(e?.isAwaitingAck == false)
+    }
+
+    @Test func retryStatePersistsAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.isOutgoing = true
+        let due = Date().addingTimeInterval(64)
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.updateEntryRetry(id: outgoing.id, retryCount: 3, nextRetryAt: due)
+
+        let e = persistence.loadEntries(max: 10).first
+        #expect(e?.retryCount == 3)
+        #expect(e?.nextRetryAt?.timeIntervalSince1970 == due.timeIntervalSince1970)
+        #expect(e?.isAwaitingAck == true)
+    }
 }

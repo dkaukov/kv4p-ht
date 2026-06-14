@@ -33,10 +33,23 @@ struct APRSEntry: Identifiable, Codable {
     var wasAcknowledged: Bool = false
     // Digipeater that repeated our outgoing packet (nil = not heard yet).
     var heardViaDigi: String? = nil
+    // Retry state for outgoing directed messages (APRS decay algorithm).
+    var retryCount: Int = 0
+    var nextRetryAt: Date? = nil
     var isOutgoing: Bool = false
     var weather: APRSWeather?
 
     var callsign: String { isOutgoing && kind == .message ? toCallsign : fromCallsign }
+
+    // A directed message still retrying toward an ack.
+    var isAwaitingAck: Bool {
+        isOutgoing && kind == .message && !wasAcknowledged && nextRetryAt != nil
+    }
+    // A directed message that exhausted its retries without an ack.
+    var isUndelivered: Bool {
+        isOutgoing && kind == .message && !wasAcknowledged
+            && nextRetryAt == nil && retryCount >= APRSController.maxRetries
+    }
 
     var time: String {
         let f = DateFormatter()
@@ -72,11 +85,35 @@ class APRSController {
     private static let heardViaDigiTTL: TimeInterval = 120
     private static let maxMessageNum = 99999
 
+    // APRS decay-algorithm retry for unacked directed messages: first retry 8s
+    // after send, doubling each time, capped at the 20-min net cycle time, then
+    // give up. See https://www.aprs.org/txt/messages101.txt.
+    private static let retryBaseInterval: TimeInterval = 8
+    private static let retryIntervalCap: TimeInterval = 20 * 60
+    static let maxRetries = 7
+    private static let retryTickInterval: TimeInterval = 5
+
+    // Interval before the nth retry (0-based): 8, 16, 32, … capped at the cap.
+    static func retryInterval(forAttempt n: Int) -> TimeInterval {
+        min(retryBaseInterval * pow(2, Double(n)), retryIntervalCap)
+    }
+
+    // State after one retransmission: bump the count, schedule the next retry —
+    // or stop (nextRetryAt = nil → undelivered) once the limit is reached.
+    static func nextRetryState(retryCount: Int, now: Date)
+        -> (retryCount: Int, nextRetryAt: Date?) {
+        let attempt = retryCount + 1
+        let next = attempt >= maxRetries
+            ? nil : now.addingTimeInterval(retryInterval(forAttempt: attempt))
+        return (attempt, next)
+    }
+
     var entries: [APRSEntry] = []
 
     @ObservationIgnored private let persistence: APRSPersistence
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var beaconTimer: Timer?
+    @ObservationIgnored private var retryTimer: Timer?
     @ObservationIgnored private var messageNumber: Int
 
     init(persistence: APRSPersistence = APRSPersistence(),
@@ -91,6 +128,7 @@ class APRSController {
             defaults.removeObject(forKey: Self.legacyEntriesKey)
         }
         entries = persistence.loadEntries(max: Self.maxEntries)
+        startRetryTimer()
     }
 
     private func append(_ entry: APRSEntry, frameHash: String? = nil) {
@@ -307,6 +345,7 @@ class APRSController {
             && msgNumsMatch(entries[i].msgNum, msgNum)
             && callsignsMatch(entries[i].toCallsign, callsign) {
             entries[i].wasAcknowledged = true
+            entries[i].nextRetryAt = nil   // stop retrying an acked message
             persistence.markEntryAcknowledged(id: entries[i].id)
             return
         }
@@ -386,11 +425,45 @@ class APRSController {
 
         guard transmitPayload(messagePayload(to: target, text: outText, msgNum: num))
         else { return false }
+        let kind: APRSPacketKind = target.hasPrefix("BLN") ? .bulletin : .message
+        // Directed messages start the decay-algorithm retry clock; bulletins
+        // are fire-and-forget (no ack expected).
+        let nextRetryAt = kind == .message
+            ? Date().addingTimeInterval(Self.retryInterval(forAttempt: 0)) : nil
         append(APRSEntry(
             fromCallsign: myCallsign?.display ?? "", toCallsign: target,
-            kind: target.hasPrefix("BLN") ? .bulletin : .message,
-            text: outText, timestamp: Date(), msgNum: num, isOutgoing: true))
+            kind: kind, text: outText, timestamp: Date(), msgNum: num,
+            nextRetryAt: nextRetryAt, isOutgoing: true))
         return true
+    }
+
+    // MARK: - Message retry (decay algorithm)
+
+    private func startRetryTimer() {
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.retryTickInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.processDueRetries() }
+        }
+    }
+
+    // Retransmits unacked directed messages whose retry is due. A retry is only
+    // consumed when actually sent — if BLE is down the message is left pending
+    // and picked up on a later tick (or when reconnect kicks this directly).
+    func processDueRetries(now: Date = Date()) {
+        guard canTransmit() else { return }
+        for i in entries.indices {
+            let e = entries[i]
+            guard e.isOutgoing, e.kind == .message, !e.wasAcknowledged,
+                  let due = e.nextRetryAt, due <= now, let num = e.msgNum
+            else { continue }
+            transmitPayload(messagePayload(to: e.toCallsign, text: e.text, msgNum: num))
+            let s = Self.nextRetryState(retryCount: e.retryCount, now: now)
+            entries[i].retryCount = s.retryCount
+            entries[i].nextRetryAt = s.nextRetryAt
+            persistence.updateEntryRetry(
+                id: e.id, retryCount: s.retryCount, nextRetryAt: s.nextRetryAt)
+        }
     }
 
     // MARK: - Position beacon

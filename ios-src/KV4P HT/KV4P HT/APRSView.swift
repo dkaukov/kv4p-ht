@@ -183,11 +183,15 @@ struct APRSRow: View {
                         if entry.isOutgoing && entry.kind == .message {
                             Image(systemName: entry.wasAcknowledged
                                   ? "checkmark.circle.fill"
+                                  : entry.isUndelivered
+                                  ? "exclamationmark.circle"
                                   : entry.heardViaDigi != nil
                                   ? "dot.radiowaves.up.forward" : "clock")
                                 .font(.system(size: 12))
                                 .foregroundStyle(entry.wasAcknowledged
                                                  ? t.green
+                                                 : entry.isUndelivered
+                                                 ? t.red
                                                  : entry.heardViaDigi != nil
                                                  ? t.accent : t.label3)
                         } else if entry.isOutgoing, entry.heardViaDigi != nil {
@@ -295,9 +299,12 @@ struct APRSDetailView: View {
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(t.accent)
                                 if entry.isOutgoing && entry.kind == .message {
-                                    Text(entry.wasAcknowledged ? "Acknowledged" : "Awaiting ack")
+                                    Text(entry.wasAcknowledged ? "Acknowledged"
+                                         : entry.isUndelivered ? "Undelivered"
+                                         : "Awaiting ack · retry \(entry.retryCount)/\(APRSController.maxRetries)")
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(entry.wasAcknowledged ? t.green : t.label3)
+                                        .foregroundStyle(entry.wasAcknowledged ? t.green
+                                                         : entry.isUndelivered ? t.red : t.label3)
                                 }
                                 if entry.isOutgoing, let digi = entry.heardViaDigi {
                                     Text("Heard via \(digi)")
