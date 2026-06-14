@@ -126,7 +126,7 @@ actor AudioManager {
     private var engine:     AVAudioEngine
     private var sourceNode: AVAudioSourceNode
     private let pcmFormat:  AVAudioFormat
-    private let ringBuffer: PCMRingBuffer
+    nonisolated(unsafe) private let ringBuffer: PCMRingBuffer
     // RT-safe one-shot startup gate. Render thread is sole writer (sets true).
     // Actor methods reset to false before engine starts / after engine stops.
     private let started: UnsafeMutablePointer<Bool>
