@@ -186,18 +186,30 @@ class APRSController {
 
         let (frameKind, frameMsgNum) = Self.frameIdentity(of: info)
 
-        // Directed messages get the long window: a sender retry means our ack
-        // was lost and we must re-ack, even across an app restart. Everything
-        // else (positions, bulletins, acks) only needs digipeat suppression.
-        var isDirectedMessage = false
+        // Identify a directed message (carries a msgNum, not an ack/rej/bulletin)
+        // so it can be deduped by identity and acked.
+        var directedTarget: String?
+        var directedMsgNum: String?
         if case let .message(target, _, msgNum, isAck, isRej) = info,
-           !isAck, !isRej, !target.hasPrefix("BLN"), msgNum != nil {
-            isDirectedMessage = true
+           !isAck, !isRej, !target.hasPrefix("BLN"), let num = msgNum {
+            directedTarget = target
+            directedMsgNum = num
         }
-        let window = isDirectedMessage ? Self.messageDedupeWindow : Self.frameDedupeWindow
-        let isDuplicate = persistence.recentIncomingFrameExists(
-            source: from, payload: frame.payload,
-            since: now.addingTimeInterval(-window))
+
+        // Directed messages get the long window and dedupe on identity
+        // (source, msgNum) — path-stable across sender retries, digipeated
+        // copies, and third-party relays whose outer header drifts. Everything
+        // else dedupes on payload bytes and only needs digipeat suppression.
+        let window = directedMsgNum != nil ? Self.messageDedupeWindow : Self.frameDedupeWindow
+        let since = now.addingTimeInterval(-window)
+        let isDuplicate: Bool
+        if let num = directedMsgNum {
+            isDuplicate = persistence.recentIncomingMessageExists(
+                source: from, msgNum: num, since: since)
+        } else {
+            isDuplicate = persistence.recentIncomingFrameExists(
+                source: from, payload: frame.payload, since: since)
+        }
 
         // Persist before any side effects.
         let frameHash = APRSPersistence.frameHash(of: data)
@@ -214,16 +226,16 @@ class APRSController {
             return
         }
 
-        // Duplicates (digipeated copies, sender retries) aren't shown again,
-        // but a retry of a directed message means our ack was lost — re-ack.
-        if isDuplicate {
-            if case let .message(target, _, msgNum, isAck, isRej) = info,
-               !isAck, !isRej, !target.hasPrefix("BLN"),
-               isAddressedToMe(target), let num = msgNum {
-                scheduleAck(to: from, msgNum: num)
-            }
-            return
+        // ACK every directed message addressed to us — first copy or retry. A
+        // sender retry means our previous ack was lost; the spec requires
+        // re-acking each copy, so the ack is never gated by the dedupe decision.
+        if let target = directedTarget, let num = directedMsgNum, isAddressedToMe(target) {
+            scheduleAck(to: from, msgNum: num)
         }
+
+        // Duplicates (digipeated copies, sender retries) are acked above but
+        // aren't shown as a new entry again.
+        if isDuplicate { return }
 
         switch info {
         case let .position(lat, lon, table, code, comment, weather):
@@ -242,15 +254,13 @@ class APRSController {
                 }
                 return
             }
+            // Directed messages addressed to us are acked earlier (every copy);
+            // here we only record the visible entry.
             let kind: APRSPacketKind = target.hasPrefix("BLN") ? .bulletin : .message
             append(APRSEntry(
                 fromCallsign: from, toCallsign: target,
                 kind: kind, text: body, timestamp: now, msgNum: msgNum),
                 frameHash: frameHash)
-            // Auto-ack directed messages that carry a message number.
-            if kind == .message, isAddressedToMe(target), let num = msgNum {
-                scheduleAck(to: from, msgNum: num)
-            }
 
         case let .object(name, lat, lon, comment):
             append(APRSEntry(
@@ -464,6 +474,26 @@ class APRSController {
             persistence.updateEntryRetry(
                 id: e.id, retryCount: s.retryCount, nextRetryAt: s.nextRetryAt)
         }
+    }
+
+    // Manual resend: transmit an unacked directed message now and restart its
+    // decay-algorithm budget from the top (fresh 7-retry cycle). Works for both
+    // awaiting-ack and exhausted/undelivered messages.
+    @discardableResult
+    func resendNow(_ id: UUID) -> Bool {
+        guard canTransmit(),
+              let i = entries.firstIndex(where: { $0.id == id }),
+              entries[i].isOutgoing, entries[i].kind == .message,
+              !entries[i].wasAcknowledged, let num = entries[i].msgNum
+        else { return false }
+        guard transmitPayload(
+            messagePayload(to: entries[i].toCallsign, text: entries[i].text, msgNum: num))
+        else { return false }
+        let next = Date().addingTimeInterval(Self.retryInterval(forAttempt: 0))
+        entries[i].retryCount = 0
+        entries[i].nextRetryAt = next
+        persistence.updateEntryRetry(id: id, retryCount: 0, nextRetryAt: next)
+        return true
     }
 
     // MARK: - Position beacon

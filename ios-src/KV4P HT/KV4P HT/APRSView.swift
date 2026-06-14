@@ -257,11 +257,22 @@ struct APRSDetailView: View {
     var entry: APRSEntry
     var onReply: (String) -> Void
 
+    // Live copy from the store so status/retry state updates after a resend;
+    // `entry` is a snapshot captured when the detail was opened.
+    private var live: APRSEntry {
+        store.aprs.entries.first { $0.id == entry.id } ?? entry
+    }
+
     private var canReply: Bool {
         !entry.isOutgoing &&
         (entry.kind == .message || entry.kind == .bulletin) &&
         store.ble.bleState == .ready &&
         !store.callsign.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var canResend: Bool {
+        live.isOutgoing && live.kind == .message && !live.wasAcknowledged &&
+        store.ble.bleState == .ready
     }
 
     var body: some View {
@@ -298,13 +309,13 @@ struct APRSDetailView: View {
                                 Text(entry.kind.label)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(t.accent)
-                                if entry.isOutgoing && entry.kind == .message {
-                                    Text(entry.wasAcknowledged ? "Acknowledged"
-                                         : entry.isUndelivered ? "Undelivered"
-                                         : "Awaiting ack · retry \(entry.retryCount)/\(APRSController.maxRetries)")
+                                if live.isOutgoing && live.kind == .message {
+                                    Text(live.wasAcknowledged ? "Acknowledged"
+                                         : live.isUndelivered ? "Undelivered"
+                                         : "Awaiting ack · retry \(live.retryCount)/\(APRSController.maxRetries)")
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(entry.wasAcknowledged ? t.green
-                                                         : entry.isUndelivered ? t.red : t.label3)
+                                        .foregroundStyle(live.wasAcknowledged ? t.green
+                                                         : live.isUndelivered ? t.red : t.label3)
                                 }
                                 if entry.isOutgoing, let digi = entry.heardViaDigi {
                                     Text("Heard via \(digi)")
@@ -350,6 +361,25 @@ struct APRSDetailView: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 46)
                             .background(t.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+
+                    if canResend {
+                        Button {
+                            store.aprs.resendNow(entry.id)
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text(live.isUndelivered ? "Resend (retry expired)" : "Resend now")
+                            }
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(live.isUndelivered ? t.red : t.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 13))
                         }
                         .padding(.horizontal, 16)

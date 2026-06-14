@@ -263,6 +263,37 @@ struct APRSPipelineTests {
         #expect(relaunched.entries.count == 1)
     }
 
+    // Identity dedupe: same originator + msgNum is the same message even if the
+    // body bytes differ, so it appends once (previously payload-keyed → twice).
+    @Test func directedMessageDedupesByMsgNumNotBody() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello world{42"))
+        #expect(controller.entries.count == 1)
+    }
+
+    // Different msgNum from the same station is a distinct message.
+    @Test func distinctMsgNumsAppendSeparately() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hi{42"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hi{43"))
+        #expect(controller.entries.count == 2)
+    }
+
+    // Third-party (}) relay retried via a different iGate: outer header drifts
+    // but the inner src+msgNum match, so it dedupes to one entry.
+    @Test func thirdPartyRetryDedupesByIdentity() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        // Double colon: TNC2 header/info separator + the message DTI ':'.
+        let a = frameBytes(from: "IGATE-1",
+            payload: "}W9VFR-4>APRS,TCPIP,qAR,IGATE-1::KC4ABC   :hello{7")
+        let b = frameBytes(from: "IGATE-2",
+            payload: "}W9VFR-4>APRS,TCPIP,qAR,IGATE-2::KC4ABC   :hello{7")
+        controller.handleAx25Frame(a)
+        controller.handleAx25Frame(b)
+        #expect(controller.entries.count == 1)
+    }
+
     @Test func shortWindowDoesNotSuppressDistinctPackets() {
         let controller = makeController(APRSPersistence(inMemory: true))
         controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: "!3449.94N/08448.56W-a"))

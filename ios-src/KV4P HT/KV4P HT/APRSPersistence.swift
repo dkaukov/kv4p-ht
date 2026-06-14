@@ -153,6 +153,20 @@ final class APRSPersistence {
         return ((try? context.count(for: req)) ?? 0) > 0
     }
 
+    // True if an incoming directed message with the same originator and message
+    // number was persisted within the window. Matching on identity (source,
+    // msgNum) rather than payload bytes is path-stable: it catches sender
+    // retries, digipeated copies, and third-party (}) relays whose outer header
+    // drifts between retransmissions but whose inner message is unchanged.
+    func recentIncomingMessageExists(source: String, msgNum: String, since: Date) -> Bool {
+        let req = NSFetchRequest<NSManagedObject>(entityName: Self.frameEntity)
+        req.predicate = NSPredicate(
+            format: "direction == %@ AND source == %@ AND kind == %@ AND msgNum == %@ AND timestamp >= %@",
+            "in", source, "message", msgNum, since as NSDate)
+        req.fetchLimit = 1
+        return ((try? context.count(for: req)) ?? 0) > 0
+    }
+
     func pruneFrames(olderThan cutoff: Date) {
         let req = NSFetchRequest<NSManagedObject>(entityName: Self.frameEntity)
         req.predicate = NSPredicate(format: "timestamp < %@", cutoff as NSDate)
