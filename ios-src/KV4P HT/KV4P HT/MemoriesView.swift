@@ -9,6 +9,7 @@ struct MemoriesView: View {
     @State private var showAddMemory = false
     @State private var editingMemory: Memory? = nil
     @State private var searchText = ""
+    @State private var isEditMode = false
 
     private var filteredMemories: [Memory] {
         guard !searchText.isEmpty else { return store.memories }
@@ -33,9 +34,13 @@ struct MemoriesView: View {
                     ForEach(groupedMemories, id: \.name) { group in
                         ListGroupView(header: "\(group.name) · \(group.items.count)") {
                             ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, mem in
-                                MemoryRow(memory: mem, channelNum: idx + 1, groupColor: t.accent, isLast: idx == group.items.count - 1, isActive: mem.id == store.activeMemoryId, onTap: {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    store.applyMemory(mem)
+                                MemoryRow(memory: mem, channelNum: idx + 1, groupColor: t.accent, isLast: idx == group.items.count - 1, isActive: mem.id == store.activeMemoryId, isEditMode: isEditMode, onTap: {
+                                    if isEditMode {
+                                        editingMemory = mem
+                                    } else {
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        store.applyMemory(mem)
+                                    }
                                 })
                                 .contextMenu {
                                     Button {
@@ -59,6 +64,12 @@ struct MemoriesView: View {
                 .background(t.bg.ignoresSafeArea())
         .searchable(text: $searchText, prompt: "Name, group, or frequency")
         .toolbar {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                Button(isEditMode ? "Done" : "Edit") {
+                    withAnimation { isEditMode.toggle() }
+                }
+                .font(isEditMode ? .system(size: 17, weight: .semibold) : .system(size: 17))
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 HeaderIconBtn(systemImage: "plus") { showAddMemory = true }
                 HeaderIconBtn(systemImage: "antenna.radiowaves.left.and.right") { showRepeaters = true }
@@ -99,6 +110,7 @@ struct MemoryRow: View {
     var groupColor: Color
     var isLast: Bool
     var isActive: Bool
+    var isEditMode: Bool = false
     var onTap: () -> Void
 
     var body: some View {
@@ -151,6 +163,13 @@ struct MemoryRow: View {
                 Text(memory.freqString)
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
                     .foregroundStyle(isActive ? groupColor : t.label2)
+
+                if isEditMode {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(t.accent)
+                        .padding(.leading, 10)
+                }
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 46)
@@ -476,44 +495,30 @@ struct AddMemoryView: View {
 
     private let tones: [Float] = [0, 67.0, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8, 97.4, 100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 203.5]
 
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .font(.system(size: 17))
-                    .foregroundStyle(t.accent)
-                Spacer()
-                Text(editing == nil ? "New Memory" : "Edit Memory")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(t.label)
-                Spacer()
-                Button("Save") {
-                    guard let freq = Float(freqText), freq > 0 else { return }
-                    let offset = Float(offsetText) ?? 0
-                    if var updated = editing {
-                        updated.name = name
-                        updated.group = group
-                        updated.freq = freq
-                        updated.offset = offset
-                        updated.plTone = toneValue
-                        updated.isRepeater = offset != 0
-                        updated.scanEnabled = scanEnabled
-                        store.updateMemory(updated)
-                    } else {
-                        store.memories.append(Memory(
-                            name: name, group: group, freq: freq, offset: offset,
-                            plTone: toneValue, squelch: 2,
-                            isRepeater: offset != 0, scanEnabled: scanEnabled
-                        ))
-                    }
-                    dismiss()
-                }
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(t.accent)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+    private func save() {
+        guard let freq = Float(freqText), freq > 0 else { return }
+        let offset = Float(offsetText) ?? 0
+        if var updated = editing {
+            updated.name = name
+            updated.group = group
+            updated.freq = freq
+            updated.offset = offset
+            updated.plTone = toneValue
+            updated.isRepeater = offset != 0
+            updated.scanEnabled = scanEnabled
+            store.updateMemory(updated)
+        } else {
+            store.memories.append(Memory(
+                name: name, group: group, freq: freq, offset: offset,
+                plTone: toneValue, squelch: 2,
+                isRepeater: offset != 0, scanEnabled: scanEnabled
+            ))
+        }
+        dismiss()
+    }
 
+    var body: some View {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 4) {
                     ListGroupView(header: "Identity") {
@@ -574,8 +579,19 @@ struct AddMemoryView: View {
                     .padding(.bottom, 16)
                 }
             }
+            .background(t.bg.ignoresSafeArea())
+            .navigationTitle(editing == nil ? "New Memory" : "Edit Memory")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .fontWeight(.bold)
+                }
+            }
         }
-        .background(t.bg.ignoresSafeArea())
         .sheet(isPresented: $showRepeaters) {
             NavigationStack {
                 RepeaterBrowserView(store: store)

@@ -123,7 +123,7 @@ struct ListGroupView<Content: View>: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(t.label2)
                     .tracking(0.4)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 32)
                     .padding(.top, 14)
                     .padding(.bottom, 7)
             }
@@ -137,7 +137,7 @@ struct ListGroupView<Content: View>: View {
                 Text(f)
                     .font(.system(size: 12.5))
                     .foregroundStyle(t.label2)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 32)
                     .padding(.top, 7)
                     .lineSpacing(3)
             }
