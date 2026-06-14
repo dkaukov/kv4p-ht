@@ -394,8 +394,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     private func onMain(_ work: @escaping () -> Void) {
-        if Thread.isMainThread { work() }
-        else { DispatchQueue.main.async(execute: work) }
+        DispatchQueue.main.async(execute: work)
     }
 
     private func log(_ msg: String) {
