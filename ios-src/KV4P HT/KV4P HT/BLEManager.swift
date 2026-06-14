@@ -297,7 +297,13 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             switch cmd {
             case 0x06: handleVendorFrame(payload)
             case 0x00:
-                log("← AX.25 \(payload.count)B")
+                if let f = AX25Frame(decoding: payload),
+                   let info = String(data: f.payload, encoding: .ascii)
+                            ?? String(data: f.payload, encoding: .isoLatin1) {
+                    log("← AX.25 \(f.source.display)>\(f.destination.display): \(info.prefix(64))")
+                } else {
+                    log("← AX.25 \(payload.count)B (undecodable)")
+                }
                 onAx25Frame?(payload)
             default:   break
             }
@@ -354,9 +360,10 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             audioFrameCount += 1
             let frameData = Data(body)
             audio.feedAdpcmFrame(frameData)
-            if audioFrameCount % 64 == 0 {
-                log(String(format: "  jitter-buf: %.0f ms", audio.fillMs))
-            }
+            // Jitter-buffer depth is noisy; uncomment to debug audio timing.
+            // if audioFrameCount % 64 == 0 {
+            //     log(String(format: "  jitter-buf: %.0f ms", audio.fillMs))
+            // }
         case 0x09:
             if let size = parseWindowUpdate(Data(body)) {
                 gate.enlargeWindow(by: Int(size))
@@ -367,7 +374,9 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 onMain { self.deviceState = ds }
             }
         case 0x01, 0x02, 0x03:
-            if let s = String(bytes: body, encoding: .utf8) { log("← DBG: \(s)") }
+            // Drop the firmware's periodic loop-frequency spam; keep other debug.
+            if let s = String(bytes: body, encoding: .utf8),
+               !s.contains("measureLoopFrequency") { log("← DBG: \(s)") }
         default:
             break
         }
