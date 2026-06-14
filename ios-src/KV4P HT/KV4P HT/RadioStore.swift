@@ -120,7 +120,16 @@ class RadioStore {
 
     // ── Voice
     var voiceMode: VoiceMode = .vfo
-    var squelch: UInt8 = 3
+    // Host-side RSSI squelch threshold (0 = monitor). Applied to RX audio
+    // muting immediately; the radio itself always runs open. See `isSquelched`.
+    var squelch: UInt8 = 3 {
+        didSet {
+            if !isInitializing {
+                UserDefaults.standard.set(Int(squelch), forKey: Self.squelchKey)
+                ble.setRxAudioMuted(isSquelched)
+            }
+        }
+    }
     // Desired VFO channel config; survives without a memory match. Seeded
     // from firmware-applied state on connect and from memory/repeater tunes.
     var vfoOffset: Float = 0       // MHz, 0 = simplex
@@ -219,6 +228,9 @@ class RadioStore {
            let mode = AppThemeMode(rawValue: raw) {
             themeMode = mode
         }
+        if let s = UserDefaults.standard.object(forKey: Self.squelchKey) as? Int {
+            squelch = UInt8(clamping: s)
+        }
         isInitializing = false
         configureSpeechManager()
 
@@ -233,15 +245,28 @@ class RadioStore {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.hydrateUISettingsFromAppliedState()
+                // Force the radio open (DRA818 squelch 0) on every connect so
+                // the firmware AFSK demod always receives — this also clears any
+                // closed squelch the firmware persisted from older builds.
+                self.radio.beginUpdate()
+                self.radio.setSquelch(0)
+                self.radio.endUpdate()
+                self.ble.setRxAudioMuted(self.isSquelched)
                 // Fire any message retries that came due while disconnected.
                 self.aprs.processDueRetries()
             }
+        }
+        // Re-evaluate the host-side squelch on every device-state (RSSI) update.
+        ble.onDeviceState = { [weak self] _ in
+            guard let self else { return }
+            self.ble.setRxAudioMuted(self.isSquelched)
         }
         aprs.updateBeaconTimer()
     }
 
     private static let themeModeKey = "themeMode"
     private static let aprsSettingsKey = "aprsSettings"
+    private static let squelchKey = "squelchLevel"
 
     private struct APRSSettings: Codable {
         var callsign: String
@@ -276,7 +301,8 @@ class RadioStore {
 
     private func hydrateUISettingsFromAppliedState() {
         guard let ds = radio.deviceState else { return }
-        squelch = ds.squelch
+        // NB: squelch is intentionally NOT hydrated from the firmware — it's a
+        // host-side RSSI threshold now (the radio runs open), persisted locally.
         bandwidth = ds.bw == DRA818_25K ? 0 : 1
         txPower = (!radio.hasHighLowPowerSwitch || (ds.flags & HOST_STATE_HIGH_POWER) != 0) ? "High" : "Low"
         filterPreemphasis = (ds.flags & HOST_STATE_FILTER_PRE) != 0
@@ -373,7 +399,7 @@ class RadioStore {
         guard let ds = ble.deviceState else { return .idle }
         switch ds.mode {
         case 0: return .tx
-        case 1: return (ds.flags & DEVICE_STATE_SQUELCHED) == 0 ? .rx : .idle
+        case 1: return isSquelched ? .idle : .rx
         default: return .idle
         }
     }
@@ -386,9 +412,14 @@ class RadioStore {
         memory(for: currentFreq)?.id
     }
 
+    // Software squelch. The radio always runs open (DRA818 squelch 0) so the
+    // firmware AFSK demodulator never starves — APRS decodes regardless of the
+    // user's squelch. The squelch slider is a host-side RSSI threshold instead:
+    // 0 = monitor (never squelched), 1–9 gate on the firmware-reported signal
+    // level. Drives RX audio muting and scan/caption squelch transitions.
     var isSquelched: Bool {
-        guard let ds = ble.deviceState else { return true }
-        return (ds.flags & DEVICE_STATE_SQUELCHED) != 0
+        guard squelch > 0 else { return false }
+        return signalLevel < Int(squelch)
     }
 
     func checkSquelchTransition() {
@@ -493,7 +524,9 @@ class RadioStore {
         radio.beginUpdate()
         radio.setTxFrequency(rxFreq + (simplexOverride ? 0 : vfoOffset))
         radio.setRxFrequency(rxFreq)
-        radio.setSquelch(squelch)
+        // Always run the radio open; squelch is enforced host-side (RSSI) so the
+        // firmware AFSK demod keeps receiving APRS at any squelch setting.
+        radio.setSquelch(0)
         radio.setBandwidth(bandwidth == 0 ? DRA818_25K : DRA818_12K5)
         radio.setTxTone(simplexOverride ? 0 : vfoToneIndex)
         radio.setRxTone(0)
