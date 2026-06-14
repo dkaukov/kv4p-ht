@@ -233,8 +233,6 @@ class RadioStore {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.hydrateUISettingsFromAppliedState()
-                // Correct the firmware's default filter config (low-pass off).
-                self.sendRadioState()
                 // Fire any message retries that came due while disconnected.
                 self.aprs.processDueRetries()
             }
@@ -283,11 +281,12 @@ class RadioStore {
         txPower = (!radio.hasHighLowPowerSwitch || (ds.flags & HOST_STATE_HIGH_POWER) != 0) ? "High" : "Low"
         filterPreemphasis = (ds.flags & HOST_STATE_FILTER_PRE) != 0
         filterHighPass = (ds.flags & HOST_STATE_FILTER_HIGH) != 0
-        // Firmware boots with the DRA818 low-pass filter bypassed, which lets
-        // audio above the AFSK band through and clips/distorts RX, causing
-        // squelch chatter and bit errors in decoded AX.25 frames. Always force
-        // it on (pushed back to firmware via sendRadioState below).
-        filterLowPass = true
+        // NB: do NOT force the DRA818 low-pass filter on here. It sits on the
+        // analog audio output that feeds both the phone audio stream and the
+        // ESP32's AFSK demodulator, and enabling it distorts the 2200 Hz space
+        // tone enough to break AX.25/APRS decode. It cleans up listening audio
+        // but kills packet RX; leave it user-controlled (default off).
+        filterLowPass = (ds.flags & HOST_STATE_FILTER_LOW) != 0
         vfoOffset = ds.freqTx - ds.freqRx
         vfoToneIndex = ds.ctcssTx
     }
