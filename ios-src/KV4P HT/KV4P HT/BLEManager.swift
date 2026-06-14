@@ -32,6 +32,9 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     // Called on bleQueue after HELLO seeding + transport ready, so the app can
     // re-apply user-level desired state (e.g. squelch) on each (re)connect.
     @ObservationIgnored var onTransportReady: (() -> Void)?
+    // Fired (on main) after each device-state frame is applied, so the host can
+    // re-evaluate the RSSI-based software squelch.
+    @ObservationIgnored var onDeviceState: ((DeviceStateFrame) -> Void)?
 
     private let bleQueue = DispatchQueue(label: "kv4p-ht.ble", qos: .userInitiated)
     private let audio = AudioManager()
@@ -42,6 +45,11 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func setAudioSampleHook(_ handler: (([Float], Int) -> Void)?) {
         audio.onDecodedSamples = handler
+    }
+
+    /// Open/close the phone-side software squelch gate on RX playback.
+    func setRxAudioMuted(_ on: Bool) {
+        audio.setRxMuted(on)
     }
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -360,10 +368,16 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             audioFrameCount += 1
             let frameData = Data(body)
             audio.feedAdpcmFrame(frameData)
-            // Jitter-buffer depth is noisy; uncomment to debug audio timing.
-            // if audioFrameCount % 64 == 0 {
-            //     log(String(format: "  jitter-buf: %.0f ms", audio.fillMs))
-            // }
+            // ~64 ADPCM frames/sec; log RX audio level + RSSI once per second to
+            // diagnose SA818 front-end overload (peak pinned ~1.0 + clips = the
+            // RX audio is clipping, which garbles AFSK/APRS decode).
+            if audioFrameCount % 64 == 0 {
+                let s = audio.takeRxStats()
+                let rssi = deviceState?.rssi ?? 0
+                log(String(format: "RX audio: peak=%.2f clips=%d rssi=%d sq=%@",
+                           s.peak, s.clips, Int(rssi),
+                           radio.isSquelched ? "closed" : "OPEN"))
+            }
         case 0x09:
             if let size = parseWindowUpdate(Data(body)) {
                 gate.enlargeWindow(by: Int(size))
@@ -371,7 +385,10 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         case 0x0B:
             if let ds = parseDeviceState(Data(body)) {
                 radio.updateDeviceState(ds)
-                onMain { self.deviceState = ds }
+                onMain {
+                    self.deviceState = ds
+                    self.onDeviceState?(ds)
+                }
             }
         case 0x01, 0x02, 0x03:
             // Drop the firmware's periodic loop-frequency spam; keep other debug.

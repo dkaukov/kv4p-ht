@@ -130,6 +130,11 @@ actor AudioManager {
     // RT-safe one-shot startup gate. Render thread is sole writer (sets true).
     // Actor methods reset to false before engine starts / after engine stops.
     private let started: UnsafeMutablePointer<Bool>
+    // Phone-side (software) squelch gate. The radio runs open (DRA818 squelch 0)
+    // so the firmware AFSK demod always has audio; this flag silences RX
+    // playback when the host-computed RSSI squelch is closed, set from
+    // RadioStore on each device-state update. Render thread is sole reader.
+    private let rxMuted: UnsafeMutablePointer<Bool>
     nonisolated(unsafe) private var playing = false
     // Set when a background engine restart fails ('!pla' etc.) — retried on
     // next foreground via recoverIfNeeded().
@@ -157,6 +162,7 @@ actor AudioManager {
     deinit {
         for obs in observations { NotificationCenter.default.removeObserver(obs) }
         started.deallocate()
+        rxMuted.deallocate()
     }
 
     init() {
@@ -167,18 +173,22 @@ actor AudioManager {
         let rb  = PCMRingBuffer(capacity: Self.capacitySamples)
         let st  = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         st.initialize(to: false)
+        let mt  = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        mt.initialize(to: false)
 
-        (engine, sourceNode) = Self.makeEngine(format: fmt, ringBuffer: rb, started: st)
+        (engine, sourceNode) = Self.makeEngine(format: fmt, ringBuffer: rb, started: st, muted: mt)
 
         pcmFormat  = fmt
         ringBuffer = rb
         started    = st
+        rxMuted    = mt
         isAvailable = true
     }
 
     private static func makeEngine(format fmt: AVAudioFormat,
                                    ringBuffer rb: PCMRingBuffer,
-                                   started st: UnsafeMutablePointer<Bool>)
+                                   started st: UnsafeMutablePointer<Bool>,
+                                   muted mt: UnsafeMutablePointer<Bool>)
         -> (AVAudioEngine, AVAudioSourceNode)
     {
         let eng = AVAudioEngine()
@@ -217,7 +227,13 @@ actor AudioManager {
 
             for channel in UnsafeMutableAudioBufferListPointer(audioBufferList) {
                 if let ptr = channel.mData?.assumingMemoryBound(to: Float.self) {
+                    // Always drain the ring buffer (keeps RX current and avoids
+                    // backlog), then zero the output when the software squelch
+                    // is closed so the user hears silence, not open-squelch hiss.
                     rb.read(into: ptr, frameCount: frames)
+                    if mt.pointee {
+                        for i in 0..<frames { ptr[i] = 0 }
+                    }
                 }
             }
             return noErr
@@ -233,7 +249,8 @@ actor AudioManager {
         engine.stop()
         (engine, sourceNode) = Self.makeEngine(format: pcmFormat,
                                                ringBuffer: ringBuffer,
-                                               started: started)
+                                               started: started,
+                                               muted: rxMuted)
     }
 
     // RX: .playback only — no mic hardware, no orange indicator, A2DP output.
@@ -284,6 +301,24 @@ actor AudioManager {
     nonisolated(unsafe) private var rxFrameLog = 0
     nonisolated(unsafe) private var rxPeakMax: Float = 0
     nonisolated(unsafe) private var rxClipCount: Int = 0
+
+    /// Returns the peak magnitude (0…1) and clip count seen since the last call,
+    /// then resets both. `rxClipCount` counts decoded samples above 0.95 — a
+    /// non-trivial count with peak pinned near 1.0 means the RX audio is
+    /// clipping (SA818 front-end / 16× firmware gain overload), which corrupts
+    /// AFSK/APRS decode. Diagnostic only.
+    /// Open/close the phone-side software squelch gate on RX playback. Safe to
+    /// call from any thread (single Bool write, render thread is sole reader).
+    nonisolated func setRxMuted(_ on: Bool) {
+        rxMuted.pointee = on
+    }
+
+    nonisolated func takeRxStats() -> (peak: Float, clips: Int) {
+        let stats = (peak: rxPeakMax, clips: rxClipCount)
+        rxPeakMax = 0
+        rxClipCount = 0
+        return stats
+    }
 
     nonisolated func feedAdpcmFrame(_ data: Data) {
         rxFrameLog += 1
