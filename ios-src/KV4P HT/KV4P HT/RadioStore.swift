@@ -225,6 +225,8 @@ class RadioStore {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.hydrateUISettingsFromAppliedState()
+                // Fire any message retries that came due while disconnected.
+                self.aprs.processDueRetries()
             }
         }
         aprs.updateBeaconTimer()

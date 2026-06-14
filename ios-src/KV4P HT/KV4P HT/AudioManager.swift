@@ -287,10 +287,11 @@ actor AudioManager {
 
     nonisolated func feedAdpcmFrame(_ data: Data) {
         rxFrameLog += 1
-        if rxFrameLog <= 3 || rxFrameLog % 100 == 0 {
-            print("[AudioManager] feedAdpcm #\(rxFrameLog) playing=\(playing) bytes=\(data.count) bufAvail=\(ringBuffer.approximateCount) peak=\(String(format: "%.3f", rxPeakMax)) clips=\(rxClipCount)")
-            if rxFrameLog % 100 == 0 { rxPeakMax = 0 }
-        }
+        // Per-frame RX audio stats are noisy; uncomment to debug audio pipeline.
+        // if rxFrameLog <= 3 || rxFrameLog % 100 == 0 {
+        //     print("[AudioManager] feedAdpcm #\(rxFrameLog) playing=\(playing) bytes=\(data.count) bufAvail=\(ringBuffer.approximateCount) peak=\(String(format: "%.3f", rxPeakMax)) clips=\(rxClipCount)")
+        //     if rxFrameLog % 100 == 0 { rxPeakMax = 0 }
+        // }
         guard playing, data.count >= 5 else { return }
         if ringBuffer.available >= Self.softMaxSamples { return }
 

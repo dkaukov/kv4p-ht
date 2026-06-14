@@ -7,8 +7,7 @@ struct APRSView: View {
     @Bindable var store: RadioStore
     @State private var selectedEntry: APRSEntry? = nil
     @State private var searchText = ""
-    @State private var showCompose = false
-    @State private var composeTo = ""
+    @State private var composeTarget: ComposeTarget?
 
     private let filters = ["All", "Messages", "Bulletins", "Positions", "Weather"]
 
@@ -80,6 +79,7 @@ struct APRSView: View {
                                 APRSRow(entry: entry,
                                         distanceMi: entry.distanceMi(from: store.locationManager.location),
                                         isLast: idx == filteredEntries.count - 1)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -96,8 +96,7 @@ struct APRSView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
-                    composeTo = ""
-                    showCompose = true
+                    composeTarget = ComposeTarget(callsign: "")
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 16, weight: .semibold))
@@ -109,23 +108,30 @@ struct APRSView: View {
             NavigationStack {
                 APRSDetailView(store: store, entry: entry) { replyTo in
                     selectedEntry = nil
-                    composeTo = replyTo
-                    showCompose = true
+                    composeTarget = ComposeTarget(callsign: replyTo)
                 }
             }
             .environment(\.theme, store.theme)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showCompose) {
+        .sheet(item: $composeTarget) { target in
             NavigationStack {
-                APRSComposeView(store: store, toCallsign: composeTo)
+                APRSComposeView(store: store, toCallsign: target.callsign)
             }
             .environment(\.theme, store.theme)
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
     }
+}
+
+// Identifiable wrapper so the compose sheet is presented with `.sheet(item:)`,
+// giving the view fresh identity per presentation — without this the compose
+// view's @State recipient is seeded only once and Reply never pre-fills.
+private struct ComposeTarget: Identifiable {
+    let id = UUID()
+    var callsign: String
 }
 
 // MARK: - APRS Row
@@ -137,6 +143,7 @@ struct APRSRow: View {
     var isLast: Bool
 
     private var kindColor: Color {
+        if entry.isOutgoing { return t.accent }
         switch entry.kind {
         case .message:  return t.accent
         case .bulletin: return t.amber
@@ -151,7 +158,7 @@ struct APRSRow: View {
         case .bulletin: return "info.circle"
         case .weather:  return "cloud.sun"
         case .object:   return "mappin.circle"
-        default:        return "location"
+        default:        return entry.isOutgoing ? "paperplane" : "location"
         }
     }
 
@@ -175,9 +182,22 @@ struct APRSRow: View {
                             .foregroundStyle(t.label)
                         if entry.isOutgoing && entry.kind == .message {
                             Image(systemName: entry.wasAcknowledged
-                                  ? "checkmark.circle.fill" : "clock")
+                                  ? "checkmark.circle.fill"
+                                  : entry.isUndelivered
+                                  ? "exclamationmark.circle"
+                                  : entry.heardViaDigi != nil
+                                  ? "dot.radiowaves.up.forward" : "clock")
                                 .font(.system(size: 12))
-                                .foregroundStyle(entry.wasAcknowledged ? t.green : t.label3)
+                                .foregroundStyle(entry.wasAcknowledged
+                                                 ? t.green
+                                                 : entry.isUndelivered
+                                                 ? t.red
+                                                 : entry.heardViaDigi != nil
+                                                 ? t.accent : t.label3)
+                        } else if entry.isOutgoing, entry.heardViaDigi != nil {
+                            Image(systemName: "dot.radiowaves.up.forward")
+                                .font(.system(size: 12))
+                                .foregroundStyle(t.accent)
                         }
                         Spacer()
                         Text(entry.time)
@@ -193,6 +213,15 @@ struct APRSRow: View {
                             .padding(.top, 1)
                     }
                     HStack(spacing: 8) {
+                        if entry.isOutgoing {
+                            Text("Sent")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(t.accent)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                         Text(entry.kind.label)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(kindColor)
@@ -228,11 +257,22 @@ struct APRSDetailView: View {
     var entry: APRSEntry
     var onReply: (String) -> Void
 
+    // Live copy from the store so status/retry state updates after a resend;
+    // `entry` is a snapshot captured when the detail was opened.
+    private var live: APRSEntry {
+        store.aprs.entries.first { $0.id == entry.id } ?? entry
+    }
+
     private var canReply: Bool {
         !entry.isOutgoing &&
         (entry.kind == .message || entry.kind == .bulletin) &&
         store.ble.bleState == .ready &&
         !store.callsign.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var canResend: Bool {
+        live.isOutgoing && live.kind == .message && !live.wasAcknowledged &&
+        store.ble.bleState == .ready
     }
 
     var body: some View {
@@ -269,10 +309,18 @@ struct APRSDetailView: View {
                                 Text(entry.kind.label)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(t.accent)
-                                if entry.isOutgoing && entry.kind == .message {
-                                    Text(entry.wasAcknowledged ? "Acknowledged" : "Awaiting ack")
+                                if live.isOutgoing && live.kind == .message {
+                                    Text(live.wasAcknowledged ? "Acknowledged"
+                                         : live.isUndelivered ? "Undelivered"
+                                         : "Awaiting ack · retry \(live.retryCount)/\(APRSController.maxRetries)")
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(entry.wasAcknowledged ? t.green : t.label3)
+                                        .foregroundStyle(live.wasAcknowledged ? t.green
+                                                         : live.isUndelivered ? t.red : t.label3)
+                                }
+                                if entry.isOutgoing, let digi = entry.heardViaDigi {
+                                    Text("Heard via \(digi)")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(t.green)
                                 }
                                 Spacer()
                                 Text(entry.time)
@@ -313,6 +361,25 @@ struct APRSDetailView: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 46)
                             .background(t.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+
+                    if canResend {
+                        Button {
+                            store.aprs.resendNow(entry.id)
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text(live.isUndelivered ? "Resend (retry expired)" : "Resend now")
+                            }
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(live.isUndelivered ? t.red : t.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 13))
                         }
                         .padding(.horizontal, 16)

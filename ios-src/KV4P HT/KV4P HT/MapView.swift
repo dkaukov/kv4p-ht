@@ -47,6 +47,7 @@ struct APRSMapView: View {
                             selectedEntry = station.entry
                         } label: {
                             StationPin(station: station, isSelected: false)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .environment(\.theme, store.theme)

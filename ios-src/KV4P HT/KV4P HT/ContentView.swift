@@ -141,6 +141,7 @@ struct KVTabBar: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 9)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }

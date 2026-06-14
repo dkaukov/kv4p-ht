@@ -135,6 +135,28 @@ struct APRSParseTests {
         #expect(!isAck)
     }
 
+    @Test func thirdPartyUnwrapMessage() throws {
+        // Real packet: aprs.fi message to W9VFR-9 gated to RF by W9VFR-1.
+        let payload = Data("}W9VFR-4>APFII0,TCPIP,W9VFR-1*::W9VFR-9  :SYN{80F32".utf8)
+        let tp = try #require(APRSController.unwrapThirdParty(payload))
+        #expect(tp.source == "W9VFR-4")
+        #expect(tp.destination == "APFII0")
+
+        guard case let .message(to, body, msgNum, isAck, _) = parseAPRSPayload(tp.info) else {
+            Issue.record("expected message, got \(parseAPRSPayload(tp.info))")
+            return
+        }
+        #expect(to == "W9VFR-9")
+        #expect(body == "SYN")
+        #expect(msgNum == "80F32")
+        #expect(!isAck)
+    }
+
+    @Test func nonThirdPartyReturnsNil() {
+        #expect(APRSController.unwrapThirdParty(Data(":N0CALL   :hi{1".utf8)) == nil)
+        #expect(APRSController.unwrapThirdParty(Data("}garbage-no-colon".utf8)) == nil)
+    }
+
     @Test func ackMessage() throws {
         let info = parseAPRSPayload(Data(":N0CALL-9 :ack42".utf8))
         guard case let .message(to, _, msgNum, isAck, _) = info else {
@@ -185,5 +207,173 @@ struct APRSParseTests {
         let long = String(repeating: "x", count: 80)
         let built = messagePayload(to: "N1AA", text: long, msgNum: "123")
         #expect(built.count == 1 + 9 + 1 + 67)
+    }
+}
+
+// MARK: - RX pipeline / persistence
+
+struct APRSPipelineTests {
+
+    // Tests run in parallel; isolate each controller's UserDefaults so the
+    // legacy-migration blob can't leak between tests via .standard.
+    private func freshDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "test-" + UUID().uuidString)!
+    }
+
+    private func makeController(_ persistence: APRSPersistence,
+                                defaults: UserDefaults? = nil) -> APRSController {
+        APRSController(persistence: persistence, defaults: defaults ?? freshDefaults())
+    }
+
+    private func frameBytes(from: String, payload: String) -> Data {
+        AX25Frame(destination: AX25Callsign(base: "APKVPA", ssid: 0),
+                  source: AX25Callsign(parsing: from)!,
+                  digipeaters: [], payload: Data(payload.utf8))
+            .encodedWithoutFCS()
+    }
+
+    @Test func duplicateDirectedMessageAppendsOnce() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        let frame = frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42")
+        controller.handleAx25Frame(frame)
+        controller.handleAx25Frame(frame)   // sender retry
+        #expect(controller.entries.count == 1)
+    }
+
+    @Test func historySurvivesRestart() {
+        let persistence = APRSPersistence(inMemory: true)
+        let first = makeController(persistence)
+        first.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42"))
+        #expect(first.entries.count == 1)
+
+        // Same store, fresh controller = app relaunch.
+        let second = makeController(persistence)
+        #expect(second.entries.count == 1)
+        #expect(second.entries.first?.text == "hello")
+        #expect(second.entries.first?.msgNum == "42")
+    }
+
+    @Test func messageDedupeSurvivesRestart() {
+        let persistence = APRSPersistence(inMemory: true)
+        let frame = frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42")
+        makeController(persistence).handleAx25Frame(frame)
+
+        let relaunched = makeController(persistence)
+        relaunched.handleAx25Frame(frame)   // retry after relaunch
+        #expect(relaunched.entries.count == 1)
+    }
+
+    // Identity dedupe: same originator + msgNum is the same message even if the
+    // body bytes differ, so it appends once (previously payload-keyed → twice).
+    @Test func directedMessageDedupesByMsgNumNotBody() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello{42"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hello world{42"))
+        #expect(controller.entries.count == 1)
+    }
+
+    // Different msgNum from the same station is a distinct message.
+    @Test func distinctMsgNumsAppendSeparately() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hi{42"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: ":KC4ABC   :hi{43"))
+        #expect(controller.entries.count == 2)
+    }
+
+    // Third-party (}) relay retried via a different iGate: outer header drifts
+    // but the inner src+msgNum match, so it dedupes to one entry.
+    @Test func thirdPartyRetryDedupesByIdentity() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        // Double colon: TNC2 header/info separator + the message DTI ':'.
+        let a = frameBytes(from: "IGATE-1",
+            payload: "}W9VFR-4>APRS,TCPIP,qAR,IGATE-1::KC4ABC   :hello{7")
+        let b = frameBytes(from: "IGATE-2",
+            payload: "}W9VFR-4>APRS,TCPIP,qAR,IGATE-2::KC4ABC   :hello{7")
+        controller.handleAx25Frame(a)
+        controller.handleAx25Frame(b)
+        #expect(controller.entries.count == 1)
+    }
+
+    @Test func shortWindowDoesNotSuppressDistinctPackets() {
+        let controller = makeController(APRSPersistence(inMemory: true))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: "!3449.94N/08448.56W-a"))
+        controller.handleAx25Frame(frameBytes(from: "N0CALL-9", payload: "!3449.94N/08448.56W-b"))
+        #expect(controller.entries.count == 2)
+    }
+
+    @Test func ackStatePersistsAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.isOutgoing = true
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.markEntryAcknowledged(id: outgoing.id)
+
+        let reloaded = persistence.loadEntries(max: 10)
+        #expect(reloaded.count == 1)
+        #expect(reloaded.first?.wasAcknowledged == true)
+    }
+
+    @Test func legacyUserDefaultsBlobMigrates() throws {
+        let defaults = freshDefaults()
+        let entry = APRSEntry(fromCallsign: "N0CALL", toCallsign: "KC4ABC",
+                              kind: .message, text: "old history", timestamp: Date())
+        defaults.set(try JSONEncoder().encode([entry]), forKey: "aprsEntries")
+
+        let controller = makeController(APRSPersistence(inMemory: true), defaults: defaults)
+        #expect(controller.entries.contains { $0.text == "old history" })
+        #expect(defaults.data(forKey: "aprsEntries") == nil)
+    }
+
+    // MARK: - Message retry (decay algorithm)
+
+    @Test func retryIntervalDecaysAndCaps() {
+        #expect(APRSController.retryInterval(forAttempt: 0) == 8)
+        #expect(APRSController.retryInterval(forAttempt: 1) == 16)
+        #expect(APRSController.retryInterval(forAttempt: 2) == 32)
+        #expect(APRSController.retryInterval(forAttempt: 6) == 512)
+        #expect(APRSController.retryInterval(forAttempt: 30) == 20 * 60)  // capped
+    }
+
+    @Test func retryStateAdvancesThenGivesUp() {
+        let now = Date()
+        // Mid-sequence: schedule the next retry.
+        let mid = APRSController.nextRetryState(retryCount: 0, now: now)
+        #expect(mid.retryCount == 1)
+        #expect(mid.nextRetryAt == now.addingTimeInterval(16))
+        // Final attempt exhausts the budget → undelivered (nil).
+        let last = APRSController.nextRetryState(retryCount: APRSController.maxRetries - 1, now: now)
+        #expect(last.retryCount == APRSController.maxRetries)
+        #expect(last.nextRetryAt == nil)
+    }
+
+    @Test func ackClearsPendingRetryAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.nextRetryAt = Date().addingTimeInterval(8)
+        outgoing.isOutgoing = true
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.markEntryAcknowledged(id: outgoing.id)
+
+        let e = persistence.loadEntries(max: 10).first
+        #expect(e?.wasAcknowledged == true)
+        #expect(e?.nextRetryAt == nil)
+        #expect(e?.isAwaitingAck == false)
+    }
+
+    @Test func retryStatePersistsAcrossReload() {
+        let persistence = APRSPersistence(inMemory: true)
+        var outgoing = APRSEntry(fromCallsign: "KC4ABC", toCallsign: "N0CALL",
+                                 kind: .message, text: "hi", timestamp: Date(), msgNum: "7")
+        outgoing.isOutgoing = true
+        let due = Date().addingTimeInterval(64)
+        persistence.insertEntry(outgoing, frameHash: nil)
+        persistence.updateEntryRetry(id: outgoing.id, retryCount: 3, nextRetryAt: due)
+
+        let e = persistence.loadEntries(max: 10).first
+        #expect(e?.retryCount == 3)
+        #expect(e?.nextRetryAt?.timeIntervalSince1970 == due.timeIntervalSince1970)
+        #expect(e?.isAwaitingAck == true)
     }
 }
