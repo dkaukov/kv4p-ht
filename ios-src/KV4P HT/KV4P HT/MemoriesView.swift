@@ -69,18 +69,21 @@ struct MemoriesView: View {
                 RepeaterBrowserView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAddMemory) {
             AddMemoryView(store: store)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingMemory) { mem in
             AddMemoryView(store: store, editing: mem)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -578,6 +581,7 @@ struct AddMemoryView: View {
                 RepeaterBrowserView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }

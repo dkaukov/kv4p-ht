@@ -107,6 +107,7 @@ struct MoreView: View {
                 SettingsView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -115,6 +116,7 @@ struct MoreView: View {
                 RecordingsView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -123,6 +125,7 @@ struct MoreView: View {
                 DeviceInfoView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -131,6 +134,7 @@ struct MoreView: View {
                 BeaconSettingsView(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -140,6 +144,7 @@ struct MoreView: View {
                                 subtitle: "Band plan configuration and frequency limits coming in a future update.")
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }

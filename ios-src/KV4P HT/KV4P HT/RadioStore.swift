@@ -99,8 +99,12 @@ struct Recording: Identifiable {
 @Observable
 class RadioStore {
     // ── Appearance
-    var themeMode: AppThemeMode = .dark
-    var theme: AppTheme { AppTheme.forMode(themeMode) }
+    var themeMode: AppThemeMode = .system {
+        didSet { if !isInitializing { UserDefaults.standard.set(themeMode.rawValue, forKey: Self.themeModeKey) } }
+    }
+    // Resolved by ContentView (which has access to the system color scheme);
+    // nested views read this via the `.theme` environment value.
+    var theme: AppTheme = .dark
 
     // ── Radio
     // Desired/applied radio state. UI writes go through this controller's
@@ -211,6 +215,10 @@ class RadioStore {
             ]
         }
         loadAprsSettings()
+        if let raw = UserDefaults.standard.string(forKey: Self.themeModeKey),
+           let mode = AppThemeMode(rawValue: raw) {
+            themeMode = mode
+        }
         isInitializing = false
         configureSpeechManager()
 
@@ -232,6 +240,7 @@ class RadioStore {
         aprs.updateBeaconTimer()
     }
 
+    private static let themeModeKey = "themeMode"
     private static let aprsSettingsKey = "aprsSettings"
 
     private struct APRSSettings: Codable {

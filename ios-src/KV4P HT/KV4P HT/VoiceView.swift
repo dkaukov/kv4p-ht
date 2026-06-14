@@ -49,18 +49,21 @@ struct VoiceView: View {
                 CaptionsSheet(store: store)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showDevicePicker) {
             DevicePickerView(ble: store.ble)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(store: store)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -275,12 +278,14 @@ private struct RadioStage: View {
         .sheet(isPresented: $showNumpad) {
             FreqNumpad(store: store, currentFreq: freq)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showOffsetTone) {
             OffsetToneSheet(store: store)
                 .environment(\.theme, store.theme)
+                .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .presentationDetents([.height(440)])
                 .presentationDragIndicator(.visible)
         }

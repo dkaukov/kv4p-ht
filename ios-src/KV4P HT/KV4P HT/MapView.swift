@@ -99,6 +99,7 @@ struct APRSMapView: View {
                 APRSDetailView(store: store, entry: entry) { _ in }
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }

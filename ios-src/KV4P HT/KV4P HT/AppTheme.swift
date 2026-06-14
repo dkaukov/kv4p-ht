@@ -3,13 +3,14 @@ import SwiftUI
 // MARK: - Theme Mode
 
 enum AppThemeMode: String, CaseIterable, Identifiable {
-    case light, dark, night
+    case light, dark, system, night
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .light: return "Light"
-        case .dark:  return "Dark"
-        case .night: return "Night"
+        case .light:  return "Light"
+        case .dark:   return "Dark"
+        case .system: return "System"
+        case .night:  return "Night"
         }
     }
 }
@@ -119,11 +120,12 @@ struct AppTheme {
         isDark:     true
     )
 
-    static func forMode(_ mode: AppThemeMode) -> AppTheme {
+    static func forMode(_ mode: AppThemeMode, systemColorScheme: ColorScheme) -> AppTheme {
         switch mode {
-        case .light: return .light
-        case .dark:  return .dark
-        case .night: return .night
+        case .light:  return .light
+        case .dark:   return .dark
+        case .night:  return .night
+        case .system: return systemColorScheme == .dark ? .dark : .light
         }
     }
 }
