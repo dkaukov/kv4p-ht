@@ -126,7 +126,7 @@ class RadioStore {
         didSet {
             if !isInitializing {
                 UserDefaults.standard.set(Int(squelch), forKey: Self.squelchKey)
-                ble.setRxAudioMuted(isSquelched)
+                ble.setRxAudioMuted(effectiveRxMuted)
             }
         }
     }
@@ -175,11 +175,24 @@ class RadioStore {
             }
         }
     }
-    var aprsBeaconFrequency: String = "Current" {
-        didSet { if !isInitializing { saveAprsSettings() } }
+    var aprsBeaconFrequency: String = "144.3900" {
+        didSet {
+            if !isInitializing {
+                saveAprsSettings()
+                ble.setRxAudioMuted(effectiveRxMuted)
+            }
+        }
     }
     var aprsPositionApprox: Bool = false {
         didSet { if !isInitializing { saveAprsSettings() } }
+    }
+    var silenceRxOnAprsFreq: Bool = false {
+        didSet {
+            if !isInitializing {
+                saveAprsSettings()
+                ble.setRxAudioMuted(effectiveRxMuted)
+            }
+        }
     }
 
     // ── Recordings
@@ -251,7 +264,7 @@ class RadioStore {
                 self.radio.beginUpdate()
                 self.radio.setSquelch(0)
                 self.radio.endUpdate()
-                self.ble.setRxAudioMuted(self.isSquelched)
+                self.ble.setRxAudioMuted(self.effectiveRxMuted)
                 // Fire any message retries that came due while disconnected.
                 self.aprs.processDueRetries()
             }
@@ -259,7 +272,7 @@ class RadioStore {
         // Re-evaluate the host-side squelch on every device-state (RSSI) update.
         ble.onDeviceState = { [weak self] _ in
             guard let self else { return }
-            self.ble.setRxAudioMuted(self.isSquelched)
+            self.ble.setRxAudioMuted(self.effectiveRxMuted)
         }
         aprs.updateBeaconTimer()
     }
@@ -276,6 +289,7 @@ class RadioStore {
         var beaconIntervalMin: Int
         var beaconFrequency: String
         var positionApprox: Bool
+        var silenceRxOnAprsFreq: Bool = false
     }
 
     private func loadAprsSettings() {
@@ -288,13 +302,15 @@ class RadioStore {
         aprsBeaconIntervalMin = s.beaconIntervalMin
         aprsBeaconFrequency = s.beaconFrequency
         aprsPositionApprox = s.positionApprox
+        silenceRxOnAprsFreq = s.silenceRxOnAprsFreq
     }
 
     private func saveAprsSettings() {
         let s = APRSSettings(
             callsign: callsign, ssid: aprsSSID, symbol: aprsSymbol,
             beaconEnabled: aprsBeaconEnabled, beaconIntervalMin: aprsBeaconIntervalMin,
-            beaconFrequency: aprsBeaconFrequency, positionApprox: aprsPositionApprox)
+            beaconFrequency: aprsBeaconFrequency, positionApprox: aprsPositionApprox,
+            silenceRxOnAprsFreq: silenceRxOnAprsFreq)
         guard let data = try? JSONEncoder().encode(s) else { return }
         UserDefaults.standard.set(data, forKey: Self.aprsSettingsKey)
     }
@@ -420,6 +436,19 @@ class RadioStore {
     var isSquelched: Bool {
         guard squelch > 0 else { return false }
         return signalLevel < Int(squelch)
+    }
+
+    // True when the user has opted to silence RX audio while tuned to their
+    // configured APRS frequency (so packet bursts aren't heard as noise).
+    var isOnAprsFreq: Bool {
+        guard silenceRxOnAprsFreq,
+              aprsBeaconFrequency != "Current",
+              let aprsFreq = Float(aprsBeaconFrequency) else { return false }
+        return abs(currentFreq - aprsFreq) < 0.0005
+    }
+
+    var effectiveRxMuted: Bool {
+        isSquelched || isOnAprsFreq
     }
 
     func checkSquelchTransition() {

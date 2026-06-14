@@ -216,10 +216,15 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 4) {
-                    // Station
-                    ListGroupView(header: "Station") {
+                    // APRS
+                    ListGroupView(
+                        header: "APRS",
+                        footer: "Silencing requires an APRS frequency set in Beacon settings (not \"Current\")."
+                    ) {
                         TextFieldRow(title: "Callsign",  text: $store.callsign,  placeholder: "N0CALL", isLast: false)
-                        TextFieldRow(title: "APRS SSID", text: $store.aprsSSID,  placeholder: "–9",     isLast: true, autocap: .never)
+                        TextFieldRow(title: "APRS SSID", text: $store.aprsSSID,  placeholder: "–9",     isLast: false, autocap: .never)
+                        ListRow(title: "Silence audio on APRS frequency", isLast: true, dense: true,
+                                accessory: KVToggle(isOn: $store.silenceRxOnAprsFreq) as (any View))
                     }
 
                     // Radio
@@ -601,7 +606,17 @@ struct BeaconSettingsView: View {
     ]
 
     private let intervals = [5, 10, 15, 30, 60]
-    private let frequencies = ["Current", "144.390"]
+    private let frequencies = ["Current", "144.3900", "144.5750", "144.6400", "144.6600", "144.8000", "145.1750", "145.8250"]
+    private let frequencyLabels = [
+        "Current",
+        "144.3900 (Americas)",
+        "144.5750 (New Zealand)",
+        "144.6400 (Japan)",
+        "144.6600 (Australia)",
+        "144.8000 (Europe/Africa)",
+        "145.1750 (Australia, alt)",
+        "145.8250 (ISS/satellite)",
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -622,6 +637,7 @@ struct BeaconSettingsView: View {
                         PickerRow(title: "Frequency",
                                   selection: $store.aprsBeaconFrequency,
                                   options: frequencies,
+                                  labels: frequencyLabels,
                                   isLast: false)
                         ListRow(title: "Approximate position", isLast: true, dense: true,
                                 accessory: KVToggle(isOn: $store.aprsPositionApprox) as (any View))
@@ -700,6 +716,7 @@ private struct PickerRow: View {
     var title: String
     @Binding var selection: String
     var options: [String]
+    var labels: [String]? = nil
     var isLast: Bool
 
     var body: some View {
@@ -710,7 +727,9 @@ private struct PickerRow: View {
                     .foregroundStyle(t.label)
                 Spacer()
                 Picker(title, selection: $selection) {
-                    ForEach(options, id: \.self) { Text($0).tag($0) }
+                    ForEach(Array(options.enumerated()), id: \.element) { i, opt in
+                        Text(labels?[i] ?? opt).tag(opt)
+                    }
                 }
                 .pickerStyle(.menu)
                 .tint(t.label2)
