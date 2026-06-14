@@ -17,6 +17,7 @@ private struct PersistentVolumeViewHost: UIViewRepresentable {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var store = RadioStore()
     @State private var selectedTab: Tab = .voice
     @State private var mpVolumeView = MPVolumeView(frame: .zero)
@@ -52,7 +53,7 @@ struct ContentView: View {
         }
     }
 
-    private var theme: AppTheme { store.theme }
+    private var theme: AppTheme { AppTheme.forMode(store.themeMode, systemColorScheme: systemColorScheme) }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -92,8 +93,11 @@ struct ContentView: View {
         }
         .environment(\.theme, theme)
         .environment(\.mpVolumeView, mpVolumeView)
-        .preferredColorScheme(theme.isDark ? .dark : .light)
+        .preferredColorScheme(store.themeMode == .system ? nil : (theme.isDark ? .dark : .light))
         .tint(theme.accent)
+        .onAppear { store.theme = theme }
+        .onChange(of: theme.mode) { _, _ in store.theme = theme }
+        .onChange(of: systemColorScheme) { _, _ in store.theme = theme }
         .onChange(of: scenePhase) { _, phase in
             // .inactive is ignored — it fires for Control Center, incoming
             // calls, etc. Audio/BLE deliberately keep running in background.

@@ -112,6 +112,7 @@ struct APRSView: View {
                 }
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -120,6 +121,7 @@ struct APRSView: View {
                 APRSComposeView(store: store, toCallsign: target.callsign)
             }
             .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
