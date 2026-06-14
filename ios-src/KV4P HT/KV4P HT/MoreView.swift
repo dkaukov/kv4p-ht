@@ -319,7 +319,7 @@ private struct TXPowerRow: View {
     @Environment(\.theme) var t
     @Bindable var store: RadioStore
 
-    private let options = ["1 W", "5 W"]
+    private let options = ["Low", "High"]
 
     var body: some View {
         HStack {
@@ -334,6 +334,7 @@ private struct TXPowerRow: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 140)
+            .disabled(!store.radio.hasHighLowPowerSwitch)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 46)

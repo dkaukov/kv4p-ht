@@ -188,7 +188,7 @@ class RadioStore {
     var aprsSSID: String = "" {
         didSet { if !isInitializing { saveAprsSettings() } }
     }
-    var txPower: String = "1 W"
+    var txPower: String = "High"
     var filterPreemphasis: Bool = true
     var filterHighPass: Bool = true
     var filterLowPass: Bool = false
@@ -278,7 +278,7 @@ class RadioStore {
         guard let ds = radio.deviceState else { return }
         squelch = ds.squelch
         bandwidth = ds.bw == DRA818_25K ? 0 : 1
-        txPower = (ds.flags & HOST_STATE_HIGH_POWER) != 0 ? "5 W" : "1 W"
+        txPower = (!radio.hasHighLowPowerSwitch || (ds.flags & HOST_STATE_HIGH_POWER) != 0) ? "High" : "Low"
         filterPreemphasis = (ds.flags & HOST_STATE_FILTER_PRE) != 0
         filterHighPass = (ds.flags & HOST_STATE_FILTER_HIGH) != 0
         filterLowPass = (ds.flags & HOST_STATE_FILTER_LOW) != 0
