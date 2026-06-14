@@ -30,8 +30,21 @@ final class APRSPersistence {
         }
         container.persistentStoreDescriptions.first?.shouldMigrateStoreAutomatically = true
         container.persistentStoreDescriptions.first?.shouldInferMappingModelAutomatically = true
-        container.loadPersistentStores { _, error in
-            if let error { print("APRS store failed to load: \(error)") }
+        container.loadPersistentStores { [container] desc, error in
+            guard let error else { return }
+            print("APRS store failed to load: \(error)")
+            // Migration/schema failure: don't brick the app over non-critical
+            // history. Destroy the incompatible store and recreate it empty.
+            guard let url = desc.url else { return }
+            do {
+                try container.persistentStoreCoordinator.destroyPersistentStore(
+                    at: url, type: NSPersistentStore.StoreType(rawValue: desc.type), options: nil)
+                try container.persistentStoreCoordinator.addPersistentStore(
+                    type: NSPersistentStore.StoreType(rawValue: desc.type),
+                    at: url, options: nil)
+            } catch {
+                print("APRS store recovery failed: \(error)")
+            }
         }
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
     }
