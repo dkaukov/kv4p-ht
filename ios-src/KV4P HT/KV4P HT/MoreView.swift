@@ -249,9 +249,6 @@ struct SettingsView: View {
                                 accessory: KVToggle(isOn: $store.filterLowPass) as (any View))
                         BandwidthRow(store: store)
                     }
-                    .onChange(of: store.filterPreemphasis) { _, _ in store.sendRadioState() }
-                    .onChange(of: store.filterHighPass)     { _, _ in store.sendRadioState() }
-                    .onChange(of: store.filterLowPass)      { _, _ in store.sendRadioState() }
 
                     // Transcription
                     ListGroupView(
@@ -343,9 +340,6 @@ private struct TXPowerRow: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 46)
-        .onChange(of: store.txPower) { _, _ in
-            store.sendRadioState()
-        }
     }
 }
 
@@ -377,9 +371,6 @@ private struct BandwidthRow: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 46)
-        .onChange(of: store.bandwidth) { _, _ in
-            store.sendRadioState()
-        }
     }
 }
 
@@ -417,9 +408,6 @@ private struct SquelchSliderRow: View {
                         .onChanged { v in
                             let pct = max(0, min(1, v.location.x / geo.size.width))
                             store.squelch = UInt8(round(pct * 9.0))
-                        }
-                        .onEnded { _ in
-                            store.sendRadioState()
                         }
                 )
             }

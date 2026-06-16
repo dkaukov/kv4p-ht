@@ -253,7 +253,6 @@ private struct RadioStage: View {
                         editable: true,
                         onEnded: { pct in
                             store.squelch = UInt8(round(pct * 9.0))
-                            store.sendRadioState(freq: Float(freq) ?? 146.52, ptt: false)
                         }
                     )
                     HStack(spacing: 8) {

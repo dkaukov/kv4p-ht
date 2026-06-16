@@ -194,7 +194,15 @@ nonisolated final class RadioModuleController: @unchecked Sendable {
         withLock {
             lastPhysPttDown = isPhysPttDown
             lastDeviceState = state
-            _appliedStateInSync = isDeviceStateInSync(state, with: lastDesiredStateSent)
+            if isDeviceStateInSync(state, with: lastDesiredStateSent) {
+                _appliedStateInSync = true
+            } else if let lastSent = lastDesiredStateSent, state.appliedSequence > lastSent.sequence {
+                _desiredState = desiredBaseline(from: state, clearingRuntimeRequests: false)
+                lastDesiredStateSent = _desiredState
+                _appliedStateInSync = true
+            } else {
+                _appliedStateInSync = false
+            }
             if _appliedStateInSync {
                 desiredStateRetries = 0
             } else {
@@ -262,17 +270,21 @@ nonisolated final class RadioModuleController: @unchecked Sendable {
         return next
     }
 
-    private func desiredBaseline(from state: DeviceStateFrame) -> HostDesiredState {
+    private func desiredBaseline(from state: DeviceStateFrame, clearingRuntimeRequests: Bool = true) -> HostDesiredState {
         guard state.hasRadioConfig else {
             var baseline = Self.initialDesiredState
             baseline.sequence = state.appliedSequence
             return baseline
         }
+        var flags = state.flags & Self.desiredDeviceFlagsMask & ~HOST_STATE_PTT_REQUESTED
+        if clearingRuntimeRequests {
+            flags &= ~HOST_STATE_RX_AUDIO_OPEN
+        }
+        flags |= HOST_STATE_ENABLE_STATUS_REPORTS
         return HostDesiredState(
             sequence: state.appliedSequence,
             memoryId: state.memoryId,
-            flags: (state.flags & Self.desiredDeviceFlagsMask & ~(HOST_STATE_PTT_REQUESTED | HOST_STATE_RX_AUDIO_OPEN))
-                | HOST_STATE_ENABLE_STATUS_REPORTS,
+            flags: flags,
             bw: state.bw,
             freqTx: state.freqTx,
             freqRx: state.freqRx,
@@ -284,6 +296,11 @@ nonisolated final class RadioModuleController: @unchecked Sendable {
     private func isDeviceStateInSync(_ deviceState: DeviceStateFrame?, with desiredState: HostDesiredState?) -> Bool {
         guard let deviceState, let desiredState, deviceState.lastError == 0 else { return false }
         guard deviceState.appliedSequence == desiredState.sequence else { return false }
+        return isDeviceStateContentInSync(deviceState, with: desiredState)
+    }
+
+    private func isDeviceStateContentInSync(_ deviceState: DeviceStateFrame, with desiredState: HostDesiredState) -> Bool {
+        guard deviceState.lastError == 0 else { return false }
         guard (deviceState.flags & Self.desiredDeviceFlagsMask) == (desiredState.flags & Self.desiredDeviceFlagsMask) else {
             return false
         }
@@ -341,8 +358,10 @@ nonisolated final class RadioModuleController: @unchecked Sendable {
     }
 
     private func sendDesiredStateIfChanged() {
-        guard updateDepth == 0, let send, transportReady, _desiredState != lastDesiredStateSent else { return }
-        _desiredState.sequence &+= 1
+        guard updateDepth == 0, let send, transportReady else { return }
+        guard _desiredState != lastDesiredStateSent else { return }
+        let appliedSequence = lastDeviceState?.appliedSequence ?? _desiredState.sequence
+        _desiredState.sequence = max(_desiredState.sequence, appliedSequence) &+ 1
         lastDesiredStateSent = _desiredState
         desiredStateRetries = 0
         _appliedStateInSync = false

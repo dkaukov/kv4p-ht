@@ -25,9 +25,9 @@ private func makeDeviceState(
 }
 
 // Firmware echo of a desired state the host sent (i.e. firmware applied it).
-private func echo(_ d: HostDesiredState, lastError: UInt8 = 0) -> DeviceStateFrame {
+private func echo(_ d: HostDesiredState, appliedSequence: UInt32? = nil, lastError: UInt8 = 0) -> DeviceStateFrame {
     DeviceStateFrame(
-        appliedSequence: d.sequence, memoryId: d.memoryId, flags: d.flags,
+        appliedSequence: appliedSequence ?? d.sequence, memoryId: d.memoryId, flags: d.flags,
         bw: d.bw, freqTx: d.freqTx, freqRx: d.freqRx,
         ctcssTx: d.ctcssTx, squelch: d.squelch, ctcssRx: d.ctcssRx,
         radioModuleStatus: RADIO_STATUS_FOUND, mode: 1, lastError: lastError, rssi: 100)
@@ -119,6 +119,33 @@ struct RadioModuleControllerTests {
 
         controller.setRxFrequency(147.0)
         #expect(sent.frames[2].sequence == 13)
+    }
+
+    @Test func nextSendUsesLatestAppliedDeviceSequence() {
+        let seed = makeDeviceState(seq: 10)
+        let (controller, sent) = makeReadyController(seed: seed)
+        controller.updateDeviceState(echo(sent.frames[0], appliedSequence: 25))
+        #expect(sent.frames.count == 1)
+        #expect(controller.isAppliedStateInSync)
+
+        controller.setSquelch(5)
+        #expect(sent.frames[1].sequence == 26)
+    }
+
+    @Test func aheadDeviceSequenceAdoptsDeviceStateWithoutSending() {
+        let seed = makeDeviceState(seq: 10, squelch: 2)
+        let (controller, sent) = makeReadyController(seed: seed)
+        controller.updateDeviceState(makeDeviceState(seq: 25, squelch: 9))
+
+        #expect(sent.frames.count == 1)
+        #expect(controller.isAppliedStateInSync)
+        #expect(controller.desiredState.sequence == 25)
+        #expect(controller.desiredState.squelch == 9)
+
+        controller.setSquelch(2)
+        #expect(sent.frames.count == 2)
+        #expect(sent.frames[1].sequence == 26)
+        #expect(sent.frames[1].squelch == 2)
     }
 
     @Test func appliedStateSyncTracksFirmwareEcho() {
