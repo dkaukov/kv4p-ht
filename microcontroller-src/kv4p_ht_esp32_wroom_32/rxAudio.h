@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "debug.h"
 #include "dsp/audioResampler.h"
 #include "dsp/softSquelchEffect.h"
+#include "freeDvSquelch.h"
 
 class SerialOutput : public AudioOutput {
 public:
@@ -78,56 +79,6 @@ static void onAfskPacketDecoded(const uint8_t *frame, size_t len) {
 }
 
 AfskDemodulator afskDemod(AUDIO_SAMPLE_RATE, 2, onAfskPacketDecoded);
-
-class FreeDvSquelch {
-public:
-  explicit FreeDvSquelch(uint8_t level = 4) { setLevel(level); reset(); }
-
-  void setLevel(uint8_t level) {
-    level_ = level > 8 ? 8 : level;
-    if (level_ == 0) open_ = true;
-  }
-
-  uint8_t level() const { return level_; }
-  bool open() const { return open_; }
-
-  bool accept(const FreeDv2400bDecodeResult &result) {
-    if (result.frameType != FreeDv2400bFrameType::VOICE) return false;
-    if (level_ == 0) {
-      open_ = true;
-      return true;
-    }
-
-    static const uint8_t maxUwErrors[9] = {16, 7, 6, 5, 4, 3, 2, 1, 0};
-    static const float minimumSnrDb[9] = {
-        -100.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
-    const bool good = result.synchronized &&
-                      result.uniqueWordErrors <= maxUwErrors[level_] &&
-                      result.discriminatorSnrDb >= minimumSnrDb[level_];
-    if (good) {
-      badFrames_ = 0;
-      if (goodFrames_ < 255) ++goodFrames_;
-      if (goodFrames_ >= 2) open_ = true;
-    } else {
-      goodFrames_ = 0;
-      if (badFrames_ < 255) ++badFrames_;
-      if (badFrames_ >= 3) open_ = false;
-    }
-    return open_ && good;
-  }
-
-  void reset() {
-    goodFrames_ = 0;
-    badFrames_ = 0;
-    open_ = level_ == 0;
-  }
-
-private:
-  uint8_t level_;
-  uint8_t goodFrames_;
-  uint8_t badFrames_;
-  bool open_;
-};
 
 FreeDvSquelch freeDvSquelch;
 
