@@ -25,11 +25,15 @@ public:
   static constexpr uint8_t GOOD_FRAMES_TO_OPEN = 10;
   static constexpr uint8_t BAD_FRAMES_TO_CLOSE = 20;
 
-  explicit FreeDvSquelch(uint8_t level = 4) { setLevel(level); reset(); }
+  explicit FreeDvSquelch(uint8_t level = 4)
+      : level_(clampLevel(level)), goodFrames_(0), badFrames_(0),
+        open_(level_ == 0) {}
 
   void setLevel(uint8_t level) {
-    level_ = level > 8 ? 8 : level;
-    if (level_ == 0) open_ = true;
+    const uint8_t clampedLevel = clampLevel(level);
+    if (clampedLevel == level_) return;
+    level_ = clampedLevel;
+    reset();
   }
 
   uint8_t level() const { return level_; }
@@ -64,6 +68,8 @@ public:
   }
 
 private:
+  static uint8_t clampLevel(uint8_t level) { return level > 8 ? 8 : level; }
+
   uint8_t level_;
   uint8_t goodFrames_;
   uint8_t badFrames_;

@@ -34,6 +34,15 @@ void test_squelch_opens_after_required_good_frames() {
   TEST_ASSERT_TRUE(squelch.open());
 }
 
+void test_changing_from_bypass_resets_open_state() {
+  FreeDvSquelch squelch(0);
+  TEST_ASSERT_TRUE(squelch.open());
+
+  squelch.setLevel(4);
+  TEST_ASSERT_FALSE(squelch.open());
+  TEST_ASSERT_FALSE(squelch.accept(voiceResult()));
+}
+
 void test_squelch_closes_and_requires_reacquisition_after_bad_frames() {
   FreeDvSquelch squelch(4);
   const auto good = voiceResult();
@@ -53,6 +62,7 @@ int main(int, char **) {
   RUN_TEST(test_level_is_clamped_to_eight);
   RUN_TEST(test_level_zero_accepts_every_voice_frame);
   RUN_TEST(test_squelch_opens_after_required_good_frames);
+  RUN_TEST(test_changing_from_bypass_resets_open_state);
   RUN_TEST(test_squelch_closes_and_requires_reacquisition_after_bad_frames);
   return UNITY_END();
 }

@@ -84,8 +84,7 @@ FreeDvSquelch freeDvSquelch;
 
 static void onFreeDvFrameDecoded(const uint8_t *frame, size_t len,
                                  const FreeDv2400bDecodeResult &result) {
-  if (frame && len == freedv2400b::PAYLOAD_BYTES &&
-      freeDvSquelch.accept(result)) {
+  if (frame && len == freedv2400b::PAYLOAD_BYTES && freeDvSquelch.accept(result)) {
     sendDigitalFrame(frame, len);
   }
 }
