@@ -24,6 +24,10 @@ class FreeDvSquelch {
 public:
   static constexpr uint8_t GOOD_FRAMES_TO_OPEN = 10;
   static constexpr uint8_t BAD_FRAMES_TO_CLOSE = 20;
+  static constexpr uint32_t FRAME_DURATION_MS =
+      freedv2400b::TX_SAMPLES * 1000UL / freedv2400b::SAMPLE_RATE;
+  static constexpr uint32_t NO_FRAME_TIMEOUT_MS =
+      BAD_FRAMES_TO_CLOSE * FRAME_DURATION_MS;
 
   explicit FreeDvSquelch(uint8_t level = 4)
       : level_(clampLevel(level)), goodFrames_(0), badFrames_(0),

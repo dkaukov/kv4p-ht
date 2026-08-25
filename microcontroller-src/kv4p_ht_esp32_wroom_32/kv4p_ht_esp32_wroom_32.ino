@@ -196,7 +196,10 @@ uint16_t deviceStateFlags(uint16_t sessionFlags) {
   if (mode == MODE_TX) {
     flags |= DEVICE_STATE_TX_ACTIVE;
   }
-  if (squelched) {
+  const bool sessionSquelched = (sessionFlags & HOST_STATE_FREEDV_2400B)
+      ? !freeDvSquelch.open()
+      : squelched;
+  if (sessionSquelched) {
     flags |= DEVICE_STATE_SQUELCHED;
   }
   return flags;
@@ -601,6 +604,7 @@ void bleKissLoop() {
 }
 
 void squelchLoop() {
+  freeDvSquelchLoop();
   bool nextSquelched = !softSquelchEffect.isSoftOpen();
   if (nextSquelched != squelched) {
     squelched = nextSquelched;

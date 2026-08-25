@@ -81,12 +81,28 @@ static void onAfskPacketDecoded(const uint8_t *frame, size_t len) {
 AfskDemodulator afskDemod(AUDIO_SAMPLE_RATE, 2, onAfskPacketDecoded);
 
 FreeDvSquelch freeDvSquelch;
+uint32_t lastFreeDvFrameAtMs = 0;
 
 static void onFreeDvFrameDecoded(const uint8_t *frame, size_t len,
                                  const FreeDv2400bDecodeResult &result) {
-  if (frame && len == freedv2400b::PAYLOAD_BYTES && freeDvSquelch.accept(result)) {
+  lastFreeDvFrameAtMs = millis();
+  const bool wasOpen = freeDvSquelch.open();
+  const bool accepted = freeDvSquelch.accept(result);
+  if (freeDvSquelch.open() != wasOpen) {
+    markDeviceStateDirty();
+  }
+  if (frame && len == freedv2400b::PAYLOAD_BYTES && accepted) {
     sendDigitalFrame(frame, len);
   }
+}
+
+void freeDvSquelchLoop() {
+  if (freeDvSquelch.level() == 0 || !freeDvSquelch.open()) return;
+  if ((uint32_t)(millis() - lastFreeDvFrameAtMs) <
+      FreeDvSquelch::NO_FRAME_TIMEOUT_MS) return;
+
+  freeDvSquelch.reset();
+  markDeviceStateDirty();
 }
 
 FreeDv2400bDemodulator freeDvRx(onFreeDvFrameDecoded);
@@ -108,6 +124,7 @@ public:
     sampleCount = 0;
     freeDvRx.reset();
     freeDvSquelch.reset();
+    lastFreeDvFrameAtMs = millis();
   }
 private:
   static const size_t BUFFER_SAMPLES = 256;

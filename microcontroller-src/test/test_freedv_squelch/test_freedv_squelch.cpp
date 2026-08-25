@@ -13,6 +13,12 @@ void test_level_is_clamped_to_eight() {
   TEST_ASSERT_EQUAL_UINT8(8, squelch.level());
 }
 
+void test_no_frame_timeout_matches_close_hysteresis() {
+  TEST_ASSERT_EQUAL_UINT32(
+      FreeDvSquelch::BAD_FRAMES_TO_CLOSE * 40,
+      FreeDvSquelch::NO_FRAME_TIMEOUT_MS);
+}
+
 void test_level_zero_accepts_every_voice_frame() {
   FreeDvSquelch squelch(0);
   auto badVoice = voiceResult(false);
@@ -60,6 +66,7 @@ void test_squelch_closes_and_requires_reacquisition_after_bad_frames() {
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_level_is_clamped_to_eight);
+  RUN_TEST(test_no_frame_timeout_matches_close_hysteresis);
   RUN_TEST(test_level_zero_accepts_every_voice_frame);
   RUN_TEST(test_squelch_opens_after_required_good_frames);
   RUN_TEST(test_changing_from_bypass_resets_open_state);
