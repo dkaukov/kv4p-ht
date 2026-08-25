@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <driver/dac.h>
 #include <esp_task_wdt.h>
 #include <AfskDemodulator.h>
+#include <FreeDv2400b.h>
 #include <math.h>
 #include "globals.h"
 #include "protocol.h"
@@ -78,6 +79,92 @@ static void onAfskPacketDecoded(const uint8_t *frame, size_t len) {
 
 AfskDemodulator afskDemod(AUDIO_SAMPLE_RATE, 2, onAfskPacketDecoded);
 
+class FreeDvSquelch {
+public:
+  explicit FreeDvSquelch(uint8_t level = 4) { setLevel(level); reset(); }
+
+  void setLevel(uint8_t level) {
+    level_ = level > 8 ? 8 : level;
+    if (level_ == 0) open_ = true;
+  }
+
+  uint8_t level() const { return level_; }
+  bool open() const { return open_; }
+
+  bool accept(const FreeDv2400bDecodeResult &result) {
+    if (result.frameType != FreeDv2400bFrameType::VOICE) return false;
+    if (level_ == 0) {
+      open_ = true;
+      return true;
+    }
+
+    static const uint8_t maxUwErrors[9] = {16, 7, 6, 5, 4, 3, 2, 1, 0};
+    static const float minimumSnrDb[9] = {
+        -100.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
+    const bool good = result.synchronized &&
+                      result.uniqueWordErrors <= maxUwErrors[level_] &&
+                      result.discriminatorSnrDb >= minimumSnrDb[level_];
+    if (good) {
+      badFrames_ = 0;
+      if (goodFrames_ < 255) ++goodFrames_;
+      if (goodFrames_ >= 2) open_ = true;
+    } else {
+      goodFrames_ = 0;
+      if (badFrames_ < 255) ++badFrames_;
+      if (badFrames_ >= 3) open_ = false;
+    }
+    return open_ && good;
+  }
+
+  void reset() {
+    goodFrames_ = 0;
+    badFrames_ = 0;
+    open_ = level_ == 0;
+  }
+
+private:
+  uint8_t level_;
+  uint8_t goodFrames_;
+  uint8_t badFrames_;
+  bool open_;
+};
+
+FreeDvSquelch freeDvSquelch;
+
+static void onFreeDvFrameDecoded(const uint8_t *frame, size_t len,
+                                 const FreeDv2400bDecodeResult &result) {
+  if (frame && len == freedv2400b::PAYLOAD_BYTES &&
+      freeDvSquelch.accept(result)) {
+    sendDigitalFrame(frame, len);
+  }
+}
+
+FreeDv2400bDemodulator freeDvRx(onFreeDvFrameDecoded);
+
+class FreeDvTapEffect : public AudioEffect {
+public:
+  FreeDvTapEffect *clone() override { return new FreeDvTapEffect(*this); }
+  effect_t process(effect_t input) {
+    if (active()) {
+      samples[sampleCount++] = (int16_t)input;
+      if (sampleCount == BUFFER_SAMPLES) {
+        freeDvRx.processSamples(samples, sampleCount);
+        sampleCount = 0;
+      }
+    }
+    return input;
+  }
+  void flush() {
+    sampleCount = 0;
+    freeDvRx.reset();
+    freeDvSquelch.reset();
+  }
+private:
+  static const size_t BUFFER_SAMPLES = 256;
+  int16_t samples[BUFFER_SAMPLES];
+  size_t sampleCount = 0;
+};
+
 class AfskTapEffect : public AudioEffect {
 public:
   AfskTapEffect *clone() override {
@@ -112,6 +199,9 @@ private:
 bool rxStreamConfigured = false;
 AnalogAudioStream in;
 AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
+// Compensate for the measured ESP32 ADC/I2S sample-clock error so the radio
+// discriminator stream arrives at the modem near its nominal 48 kHz rate.
+static const uint32_t RX_ADC_SAMPLE_RATE = 48400;
 AudioInfo rxAudioInfo(AUDIO_WIRE_SAMPLE_RATE, 1, 16);
 SerialOutput rxAudioOutput;
 ADPCMEncoder rxAdpcmEncoder(AV_CODEC_ID_ADPCM_IMA_WAV, AUDIO_FRAME_BYTES);
@@ -124,6 +214,7 @@ Boost mute(0.0);
 Boost gain(16.0);
 DCOffsetRemover dcOffsetRemover(DECAY_TIME, AUDIO_SAMPLE_RATE);
 AfskTapEffect afskTapEffect;
+FreeDvTapEffect freeDvTapEffect;
 SoftSquelchEffect softSquelchEffect(AUDIO_SAMPLE_RATE, ZCR_DECAY_TIME, SQ_CLOSE_DELAY);
 
 inline void injectADCBias() {
@@ -148,7 +239,7 @@ void initI2SRx() {
   config.use_apll = true;
   config.auto_clear = false;
   config.adc_pin = hw.pins.pinAudioIn;
-  config.sample_rate = AUDIO_SAMPLE_RATE * 1.00;
+  config.sample_rate = RX_ADC_SAMPLE_RATE;
   in.begin(config);
   // effects
   effects.clear();
@@ -156,6 +247,8 @@ void initI2SRx() {
   effects.addEffect(dcOffsetRemover);
   effects.addEffect(gain);
   effects.addEffect(afskTapEffect);
+  freeDvTapEffect.setActive(true);
+  effects.addEffect(freeDvTapEffect);
   effects.addEffect(softSquelchEffect);
   effects.addEffect(mute);
   effects.begin(rxInfo);
@@ -170,6 +263,7 @@ void initI2SRx() {
 void endI2SRx() {
   if (rxStreamConfigured) {
     afskTapEffect.flush();
+    freeDvTapEffect.flush();
     rxOut.end();
     effects.end();
     in.end();

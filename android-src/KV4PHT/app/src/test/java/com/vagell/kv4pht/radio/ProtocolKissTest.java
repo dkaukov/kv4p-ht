@@ -360,7 +360,7 @@ public class ProtocolKissTest {
         versionPayload.put((byte) 1);
         versionPayload.putFloat(400.0f);
         versionPayload.putFloat(480.0f);
-        versionPayload.put((byte) 0x03);
+        versionPayload.put((byte) 0x0B);
 
         java.util.Optional<Protocol.FirmwareVersion> parsed = Protocol.FirmwareVersion.from(versionPayload, 0, versionPayload.array().length);
 
@@ -372,6 +372,7 @@ public class ProtocolKissTest {
         assertEquals(480.0f, parsed.get().getMaxRadioFreq(), 0.0001f);
         assertTrue(parsed.get().isHasHl());
         assertTrue(parsed.get().isHasPhysPtt());
+        assertTrue(parsed.get().isHasFreeDv2400b());
     }
 
     @Test

@@ -171,7 +171,8 @@ void savePersistedRadioStateIfChanged() {
 uint8_t getFirmwareFeatures() {
   return (hw.features.hasHL ? FEATURE_HAS_HL : 0)
     | (hw.features.hasPhysPTT ? FEATURE_HAS_PHY_PTT : 0)
-    | FEATURE_HAS_ESP32_AFSK;
+    | FEATURE_HAS_ESP32_AFSK
+    | FEATURE_HAS_FREEDV_2400B;
 }
 
 Mode rxIdleMode() {
@@ -303,6 +304,7 @@ void reconcileDesiredState(bool sendReport = true) {
     appliedState.ctcss_tx = desiredState.ctcss_tx;
     appliedState.squelch = desiredState.squelch;
     softSquelchEffect.setDeadbandLevel(appliedState.squelch);
+    freeDvSquelch.setLevel(appliedState.squelch);
     appliedState.ctcss_rx = desiredState.ctcss_rx;
     appliedState.memoryId = desiredState.memoryId;
     appliedState.flags |= HOST_STATE_RADIO_CONFIG_VALID;
@@ -324,6 +326,8 @@ void setMode(Mode newMode) {
   if (mode == newMode) {
     return;
   }
+  freeDvRx.reset();
+  freeDvTx.reset();
   mode = newMode;
   markDeviceStateDirty();
   switch (mode) {
@@ -442,8 +446,17 @@ void initRadio(bool isHigh) {
 void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *params, size_t param_len) {
   switch (command) {
     case COMMAND_HOST_TX_AUDIO:
-      if (mode == MODE_TX) {
+      if (mode == MODE_TX && !(session.flags & HOST_STATE_FREEDV_2400B)) {
         processTxAudio(params, param_len);
+        esp_task_wdt_reset();
+      }
+      break;
+    case COMMAND_HOST_TX_DIGITAL:
+      // The command ID unambiguously selects the digital path. Do not also
+      // gate it on the session flag: PTT and session-state snapshots travel
+      // independently and the first voice frame can win that race.
+      if (mode == MODE_TX) {
+        processTxDigital(params, param_len);
         esp_task_wdt_reset();
       }
       break;

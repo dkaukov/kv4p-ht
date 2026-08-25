@@ -27,6 +27,8 @@ static_assert(sizeof(Version) == 17, "Version wire size must match Android");
 static_assert(sizeof(Hello) == 43, "Hello wire size must match Android");
 static_assert(COMMAND_HOST_TX_AUDIO == 0x0C, "Host TX audio command id must match Android");
 static_assert(COMMAND_RX_AUDIO == 0x0C, "RX audio command id must match Android");
+static_assert(COMMAND_HOST_TX_DIGITAL == 0x0E, "Host digital command id must match Android");
+static_assert(COMMAND_RX_DIGITAL == 0x0E, "RX digital command id must match Android");
 
 struct CapturedCommand {
   bool called;
