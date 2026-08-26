@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <FreeDv2400b.h>
+#include <math.h>
 #include <stdint.h>
 
 class FreeDvSquelch {
@@ -28,6 +29,32 @@ public:
       freedv2400b::TX_SAMPLES * 1000UL / freedv2400b::SAMPLE_RATE;
   static constexpr uint32_t NO_FRAME_TIMEOUT_MS =
       BAD_FRAMES_TO_CLOSE * FRAME_DURATION_MS;
+
+  // Map calibrated FreeDV discriminator SNR onto Codec2Talkie's VHF
+  // S1..S9+10 range, then encode it in KV4P's SA818 RSSI wire format.
+  static uint8_t snrToRssi(float snrDb) {
+    static constexpr float NOISE_SNR_DB = 4.46f;
+    static constexpr float S9_SNR_DB = 17.0f;
+    static constexpr float IDEAL_SNR_DB = 41.91f;
+    float equivalentDbm;
+    if (snrDb <= NOISE_SNR_DB) {
+      equivalentDbm = -141.0f;
+    } else if (snrDb < S9_SNR_DB) {
+      const float level =
+          (snrDb - NOISE_SNR_DB) / (S9_SNR_DB - NOISE_SNR_DB);
+      equivalentDbm = -141.0f + level * 48.0f;
+    } else if (snrDb < IDEAL_SNR_DB) {
+      const float level =
+          (snrDb - S9_SNR_DB) / (IDEAL_SNR_DB - S9_SNR_DB);
+      equivalentDbm = -93.0f + level * 10.0f;
+    } else {
+      equivalentDbm = -83.0f;
+    }
+    long encoded = lroundf((equivalentDbm * 10.0f + 1608.0f) / 12.0f);
+    if (encoded < 0) encoded = 0;
+    if (encoded > 255) encoded = 255;
+    return static_cast<uint8_t>(encoded);
+  }
 
   explicit FreeDvSquelch(uint8_t level = 4)
       : level_(clampLevel(level)), goodFrames_(0), badFrames_(0),

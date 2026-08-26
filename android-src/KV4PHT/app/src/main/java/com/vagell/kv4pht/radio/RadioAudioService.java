@@ -266,6 +266,7 @@ public class RadioAudioService extends Service {
         default void txStarted() {}
         default void txEnded() {}
         default void moduleStateChanged(boolean txActive, boolean squelched) {}
+        default void freeDvModeChanged(boolean enabled) {}
         default void chatError(String text) {}
         default void sMeterUpdate(int value) {}
         default void sentAprsBeacon(double latitude, double longitude, String frequencyStr, boolean wasSwitch) {}
@@ -1546,6 +1547,14 @@ public class RadioAudioService extends Service {
 
     private void handleDeviceState(Protocol.DeviceState state) {
         radioModule.updateDeviceState(state);
+        boolean deviceFreeDvEnabled = radioModule.isFreeDv2400bEnabled();
+        if (freeDv2400bEnabled != deviceFreeDvEnabled) {
+            if (deviceFreeDvEnabled && codec2 == null) codec2 = new Codec2();
+            freeDv2400bEnabled = deviceFreeDvEnabled;
+            codec2TxSamples = 0;
+            codec2HasPendingInput = false;
+            callbacks.freeDvModeChanged(deviceFreeDvEnabled);
+        }
         syncActiveRadioConfig(state);
         final boolean deviceTxActive = radioModule.isDeviceTxActive();
         callbacks.moduleStateChanged(deviceTxActive, radioModule.isSquelched());

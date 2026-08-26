@@ -756,7 +756,8 @@ public class ProtocolKissTest {
             .flags(Protocol.HOST_STATE_RADIO_CONFIG_VALID
                 | Protocol.HOST_STATE_PTT_REQUESTED
                 | Protocol.HOST_STATE_RX_AUDIO_OPEN
-                | Protocol.HOST_STATE_HIGH_POWER)
+                | Protocol.HOST_STATE_HIGH_POWER
+                | Protocol.HOST_STATE_FREEDV_2400B)
             .bw(Protocol.DRA818_25K)
             .freqTx(146.5200f)
             .freqRx(146.5200f)
@@ -778,6 +779,7 @@ public class ProtocolKissTest {
         assertEquals(0, flags & Protocol.HOST_STATE_PTT_REQUESTED);
         assertEquals(0, flags & Protocol.HOST_STATE_RX_AUDIO_OPEN);
         assertNotEquals(0, flags & Protocol.HOST_STATE_HIGH_POWER);
+        assertNotEquals(0, flags & Protocol.HOST_STATE_FREEDV_2400B);
         assertNotEquals(0, flags & Protocol.HOST_STATE_ENABLE_STATUS_REPORTS);
     }
 
@@ -958,11 +960,11 @@ public class ProtocolKissTest {
         assertEquals(8, Protocol.calculateSMeterValue(56));
         assertEquals(9, Protocol.calculateSMeterValue(57));
         assertEquals(9, Protocol.calculateSMeterValue(64));
-        assertEquals(9, Protocol.calculateSMeterValue(65));
-        assertEquals(10, Protocol.calculateSMeterValue(74));
-        assertEquals(10, Protocol.calculateSMeterValue(82));
-        assertEquals(11, Protocol.calculateSMeterValue(90));
-        assertEquals(11, Protocol.calculateSMeterValue(99));
+        assertEquals(10, Protocol.calculateSMeterValue(65));
+        assertEquals(11, Protocol.calculateSMeterValue(74));
+        assertEquals(11, Protocol.calculateSMeterValue(82));
+        assertEquals(12, Protocol.calculateSMeterValue(90));
+        assertEquals(12, Protocol.calculateSMeterValue(99));
         assertEquals(12, Protocol.calculateSMeterValue(107));
         assertEquals(12, Protocol.calculateSMeterValue(109));
         assertEquals(13, Protocol.calculateSMeterValue(110));

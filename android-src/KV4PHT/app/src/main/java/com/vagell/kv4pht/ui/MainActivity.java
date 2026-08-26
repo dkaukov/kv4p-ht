@@ -476,6 +476,11 @@ public class MainActivity extends AppCompatActivity {
                     runOnUiThread(() -> showModuleState(txActive, squelched));
                 }
 
+                @Override
+                public void freeDvModeChanged(boolean enabled) {
+                    runOnUiThread(() -> updateVoiceModeCaption());
+                }
+
                 /**
                  * Shows firmware-reported TX and squelch state even when Android did not
                  * initiate PTT, for example while firmware is transmitting an APRS packet.

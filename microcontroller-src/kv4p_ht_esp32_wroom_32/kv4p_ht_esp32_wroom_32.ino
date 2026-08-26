@@ -187,6 +187,10 @@ bool txAllowedByHost() {
   return desiredState.flags & HOST_STATE_TX_ALLOWED;
 }
 
+bool freeDv2400bEnabled() {
+  return desiredState.flags & HOST_STATE_FREEDV_2400B;
+}
+
 uint16_t deviceStateFlags(uint16_t sessionFlags) {
   uint16_t flags = desiredState.flags;
   flags |= sessionFlags & HOST_STATE_SESSION_FLAG_MASK;
@@ -196,10 +200,7 @@ uint16_t deviceStateFlags(uint16_t sessionFlags) {
   if (mode == MODE_TX) {
     flags |= DEVICE_STATE_TX_ACTIVE;
   }
-  const bool sessionSquelched = (sessionFlags & HOST_STATE_FREEDV_2400B)
-      ? !freeDvSquelch.open()
-      : squelched;
-  if (sessionSquelched) {
+  if (squelched) {
     flags |= DEVICE_STATE_SQUELCHED;
   }
   return flags;
@@ -308,6 +309,7 @@ void reconcileDesiredState(bool sendReport = true) {
     appliedState.squelch = desiredState.squelch;
     softSquelchEffect.setDeadbandLevel(appliedState.squelch);
     freeDvSquelch.setLevel(appliedState.squelch);
+    if (freeDv2400bEnabled()) squelched = !freeDvSquelch.open();
     appliedState.ctcss_rx = desiredState.ctcss_rx;
     appliedState.memoryId = desiredState.memoryId;
     appliedState.flags |= HOST_STATE_RADIO_CONFIG_VALID;
@@ -449,7 +451,7 @@ void initRadio(bool isHigh) {
 void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *params, size_t param_len) {
   switch (command) {
     case COMMAND_HOST_TX_AUDIO:
-      if (mode == MODE_TX && !(session.flags & HOST_STATE_FREEDV_2400B)) {
+      if (mode == MODE_TX && !freeDv2400bEnabled()) {
         processTxAudio(params, param_len);
         esp_task_wdt_reset();
       }
@@ -458,7 +460,7 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
       // The command ID unambiguously selects the digital path. Do not also
       // gate it on the session flag: PTT and session-state snapshots travel
       // independently and the first voice frame can win that race.
-      if (mode == MODE_TX) {
+      if (mode == MODE_TX && freeDv2400bEnabled()) {
         processTxDigital(params, param_len);
         esp_task_wdt_reset();
       }
@@ -474,8 +476,18 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
         // DeviceState.appliedSequence before sending their next update.
         bool globalStateChanged = incomingState.sequence > desiredState.sequence;
         if (globalStateChanged) {
+          const bool freeDvModeChanged =
+              ((incomingState.flags ^ desiredState.flags) &
+               HOST_STATE_FREEDV_2400B) != 0;
           desiredState = incomingState;
           desiredState.flags &= HOST_STATE_GLOBAL_FLAG_MASK;
+          if (freeDvModeChanged) {
+            latestRssi = 0;
+            freeDvSquelch.reset();
+            squelched = freeDv2400bEnabled()
+                ? !freeDvSquelch.open()
+                : !softSquelchEffect.isSoftOpen();
+          }
         }
         if (sessionFlagsChanged || globalStateChanged) {
           reconcileDesiredState();
@@ -509,7 +521,7 @@ void rssiLoop() {
           latestRssi = rssi;
           markDeviceStateDirty();
         }
-      } else if (mode == MODE_RX) {
+      } else if (mode == MODE_RX && !freeDv2400bEnabled()) {
         // TODO fix the dra818 library's implementation of rssi(). Right now it just drops the
         // return value from the module, and just tells us success/fail.
         // int rssi = dra->rssi();
@@ -605,6 +617,7 @@ void bleKissLoop() {
 
 void squelchLoop() {
   freeDvSquelchLoop();
+  if (freeDv2400bEnabled()) return;
   bool nextSquelched = !softSquelchEffect.isSoftOpen();
   if (nextSquelched != squelched) {
     squelched = nextSquelched;

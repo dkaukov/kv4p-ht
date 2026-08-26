@@ -19,6 +19,14 @@ void test_no_frame_timeout_matches_close_hysteresis() {
       FreeDvSquelch::NO_FRAME_TIMEOUT_MS);
 }
 
+void test_snr_maps_to_codec2talkie_equivalent_rssi() {
+  TEST_ASSERT_EQUAL_UINT8(17, FreeDvSquelch::snrToRssi(4.46f));
+  TEST_ASSERT_EQUAL_UINT8(57, FreeDvSquelch::snrToRssi(17.0f));
+  TEST_ASSERT_EQUAL_UINT8(65, FreeDvSquelch::snrToRssi(41.91f));
+  TEST_ASSERT_EQUAL_UINT8(17, FreeDvSquelch::snrToRssi(-100.0f));
+  TEST_ASSERT_EQUAL_UINT8(65, FreeDvSquelch::snrToRssi(300.0f));
+}
+
 void test_level_zero_accepts_every_voice_frame() {
   FreeDvSquelch squelch(0);
   auto badVoice = voiceResult(false);
@@ -67,6 +75,7 @@ int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_level_is_clamped_to_eight);
   RUN_TEST(test_no_frame_timeout_matches_close_hysteresis);
+  RUN_TEST(test_snr_maps_to_codec2talkie_equivalent_rssi);
   RUN_TEST(test_level_zero_accepts_every_voice_frame);
   RUN_TEST(test_squelch_opens_after_required_good_frames);
   RUN_TEST(test_changing_from_bypass_resets_open_state);

@@ -178,7 +178,7 @@ Android sends the full desired-state snapshot whenever one field changes. Firmwa
 
 `HOST_STATE_ENABLE_STATUS_REPORTS` is a non-persisted session flag that defaults off. kv4p HT Android sets it after HELLO so firmware sends `COMMAND_DEVICE_STATE`; generic KISS TNC hosts can leave it off to receive only standard KISS DATA frames.
 
-`HOST_STATE_FREEDV_2400B` is a non-persisted session flag. When it and `HOST_STATE_RX_AUDIO_OPEN` are set, firmware sends 7-byte Codec2 frames on `COMMAND_RX_DIGITAL` instead of ADPCM audio. During host-requested PTT, the same session must continuously send 7-byte `COMMAND_HOST_TX_DIGITAL` frames. Each frame represents 320 speech samples at 8 kHz and 1,920 modem samples at 48 kHz (40 ms).
+`HOST_STATE_FREEDV_2400B` is a non-persisted global flag. When it and a session's `HOST_STATE_RX_AUDIO_OPEN` flag are set, firmware sends 7-byte Codec2 frames on `COMMAND_RX_DIGITAL` instead of ADPCM audio. During host-requested PTT, the host must continuously send 7-byte `COMMAND_HOST_TX_DIGITAL` frames. Each frame represents 320 speech samples at 8 kHz and 1,920 modem samples at 48 kHz (40 ms).
 
 Android treats `DeviceState.appliedSequence` as the acknowledgement for the latest desired-state snapshot. If received device state does not match the last sent desired snapshot, Android may retry the exact same `HostDesiredState` with the same `sequence`. Retries are bounded; they are not new logical state changes and must not increment `sequence`.
 

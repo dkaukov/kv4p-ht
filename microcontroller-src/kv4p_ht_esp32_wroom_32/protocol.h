@@ -105,8 +105,7 @@ REQUIRE_TRIVIALLY_COPYABLE(Version);
 
 static constexpr uint16_t HOST_STATE_SESSION_FLAG_MASK =
   HOST_STATE_RX_AUDIO_OPEN
-  | HOST_STATE_ENABLE_STATUS_REPORTS
-  | HOST_STATE_FREEDV_2400B;
+  | HOST_STATE_ENABLE_STATUS_REPORTS;
 
 static constexpr uint16_t HOST_STATE_GLOBAL_FLAG_MASK =
   HOST_STATE_RADIO_CONFIG_VALID
@@ -116,7 +115,8 @@ static constexpr uint16_t HOST_STATE_GLOBAL_FLAG_MASK =
   | HOST_STATE_FILTER_PRE
   | HOST_STATE_FILTER_HIGH
   | HOST_STATE_FILTER_LOW
-  | HOST_STATE_TX_ALLOWED;
+  | HOST_STATE_TX_ALLOWED
+  | HOST_STATE_FREEDV_2400B;
 
 struct ProtocolSession {
   Stream *stream;
@@ -365,26 +365,27 @@ void inline sendDeviceState(const DeviceState &state) {
 }
 
 void inline sendAudio(const uint8_t *data, size_t len) {
-  if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN) && !(protocolUsbSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (freeDv2400bEnabled()) return;
+  if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolUsbSession.stream, COMMAND_RX_AUDIO, data, len);
   }
-  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN) && !(protocolBtSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBtSession.stream, COMMAND_RX_AUDIO, data, len);
   }
-  if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN) && !(protocolBleSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBleSession.stream, COMMAND_RX_AUDIO, data, len);
   }
 }
 
 void inline sendDigitalFrame(const uint8_t *data, size_t len) {
-  if (len != 7) return;
-  if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN) && (protocolUsbSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (!freeDv2400bEnabled() || len != 7) return;
+  if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolUsbSession.stream, COMMAND_RX_DIGITAL, data, len);
   }
-  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN) && (protocolBtSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBtSession.stream, COMMAND_RX_DIGITAL, data, len);
   }
-  if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN) && (protocolBleSession.flags & HOST_STATE_FREEDV_2400B)) {
+  if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBleSession.stream, COMMAND_RX_DIGITAL, data, len);
   }
 }

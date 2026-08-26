@@ -49,8 +49,7 @@ public class RadioModuleController {
             | Protocol.HOST_STATE_FREEDV_2400B;
     private static final int SESSION_FLAGS_MASK =
         Protocol.HOST_STATE_RX_AUDIO_OPEN
-            | Protocol.HOST_STATE_ENABLE_STATUS_REPORTS
-            | Protocol.HOST_STATE_FREEDV_2400B;
+            | Protocol.HOST_STATE_ENABLE_STATUS_REPORTS;
     private static final int DEFAULT_DESIRED_FLAGS =
         Protocol.HOST_STATE_HIGH_POWER | Protocol.HOST_STATE_RSSI_ENABLED | Protocol.HOST_STATE_ENABLE_STATUS_REPORTS;
 

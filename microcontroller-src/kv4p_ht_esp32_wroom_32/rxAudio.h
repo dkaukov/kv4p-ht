@@ -86,9 +86,10 @@ uint32_t lastFreeDvFrameAtMs = 0;
 static void onFreeDvFrameDecoded(const uint8_t *frame, size_t len,
                                  const FreeDv2400bDecodeResult &result) {
   lastFreeDvFrameAtMs = millis();
-  const bool wasOpen = freeDvSquelch.open();
   const bool accepted = freeDvSquelch.accept(result);
-  if (freeDvSquelch.open() != wasOpen) {
+  const bool nextSquelched = !freeDvSquelch.open();
+  if (freeDv2400bEnabled() && nextSquelched != squelched) {
+    squelched = nextSquelched;
     markDeviceStateDirty();
   }
   if (frame && len == freedv2400b::PAYLOAD_BYTES && accepted) {
@@ -97,12 +98,18 @@ static void onFreeDvFrameDecoded(const uint8_t *frame, size_t len,
 }
 
 void freeDvSquelchLoop() {
-  if (freeDvSquelch.level() == 0 || !freeDvSquelch.open()) return;
-  if ((uint32_t)(millis() - lastFreeDvFrameAtMs) <
+  const uint32_t now = millis();
+  if ((uint32_t)(now - lastFreeDvFrameAtMs) <
       FreeDvSquelch::NO_FRAME_TIMEOUT_MS) return;
 
-  freeDvSquelch.reset();
-  markDeviceStateDirty();
+  if (freeDv2400bEnabled() && freeDvSquelch.level() != 0 &&
+      freeDvSquelch.open()) {
+    freeDvSquelch.reset();
+    if (!squelched) {
+      squelched = true;
+      markDeviceStateDirty();
+    }
+  }
 }
 
 FreeDv2400bDemodulator freeDvRx(onFreeDvFrameDecoded);
@@ -115,6 +122,10 @@ public:
       samples[sampleCount++] = (int16_t)input;
       if (sampleCount == BUFFER_SAMPLES) {
         freeDvRx.processSamples(samples, sampleCount);
+        if (freeDv2400bEnabled() && freeDvRx.hasDecodeResult()) {
+          latestRssi = FreeDvSquelch::snrToRssi(
+              freeDvRx.discriminatorSnrDbNow());
+        }
         sampleCount = 0;
       }
     }
@@ -124,6 +135,7 @@ public:
     sampleCount = 0;
     freeDvRx.reset();
     freeDvSquelch.reset();
+    if (freeDv2400bEnabled()) squelched = !freeDvSquelch.open();
     lastFreeDvFrameAtMs = millis();
   }
 private:
