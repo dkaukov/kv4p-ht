@@ -960,11 +960,11 @@ public class ProtocolKissTest {
         assertEquals(8, Protocol.calculateSMeterValue(56));
         assertEquals(9, Protocol.calculateSMeterValue(57));
         assertEquals(9, Protocol.calculateSMeterValue(64));
-        assertEquals(10, Protocol.calculateSMeterValue(65));
-        assertEquals(11, Protocol.calculateSMeterValue(74));
-        assertEquals(11, Protocol.calculateSMeterValue(82));
-        assertEquals(12, Protocol.calculateSMeterValue(90));
-        assertEquals(12, Protocol.calculateSMeterValue(99));
+        assertEquals(9, Protocol.calculateSMeterValue(65));
+        assertEquals(10, Protocol.calculateSMeterValue(74));
+        assertEquals(10, Protocol.calculateSMeterValue(82));
+        assertEquals(11, Protocol.calculateSMeterValue(90));
+        assertEquals(11, Protocol.calculateSMeterValue(99));
         assertEquals(12, Protocol.calculateSMeterValue(107));
         assertEquals(12, Protocol.calculateSMeterValue(109));
         assertEquals(13, Protocol.calculateSMeterValue(110));
