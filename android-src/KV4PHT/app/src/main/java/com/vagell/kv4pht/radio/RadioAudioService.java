@@ -1430,7 +1430,7 @@ public class RadioAudioService extends Service {
                 codec2HasPendingInput = true;
                 continue;
             }
-            codec2TxPcm[codec2TxSamples++] = (short) (((int) codec2PendingInput + sample) / 2);
+            codec2TxPcm[codec2TxSamples++] = (short) ((codec2PendingInput + sample) / 2);
             codec2HasPendingInput = false;
             if (codec2TxSamples == Codec2.PCM_SAMPLES) {
                 codec2.encode(codec2TxPcm, codec2Frame);
@@ -1547,14 +1547,7 @@ public class RadioAudioService extends Service {
 
     private void handleDeviceState(Protocol.DeviceState state) {
         radioModule.updateDeviceState(state);
-        boolean deviceFreeDvEnabled = radioModule.isFreeDv2400bEnabled();
-        if (freeDv2400bEnabled != deviceFreeDvEnabled) {
-            if (deviceFreeDvEnabled && codec2 == null) codec2 = new Codec2();
-            freeDv2400bEnabled = deviceFreeDvEnabled;
-            codec2TxSamples = 0;
-            codec2HasPendingInput = false;
-            callbacks.freeDvModeChanged(deviceFreeDvEnabled);
-        }
+        syncFreeDvModeFromDevice();
         syncActiveRadioConfig(state);
         final boolean deviceTxActive = radioModule.isDeviceTxActive();
         callbacks.moduleStateChanged(deviceTxActive, radioModule.isSquelched());
@@ -1577,6 +1570,17 @@ public class RadioAudioService extends Service {
                 callbacks.forcedPttEnd();
             }
         }
+    }
+
+    private void syncFreeDvModeFromDevice() {
+        boolean enabled = radioModule.isFreeDv2400bEnabled();
+        if (freeDv2400bEnabled == enabled) return;
+
+        if (enabled && codec2 == null) codec2 = new Codec2();
+        freeDv2400bEnabled = enabled;
+        codec2TxSamples = 0;
+        codec2HasPendingInput = false;
+        callbacks.freeDvModeChanged(enabled);
     }
 
     private void syncActiveRadioConfig(Protocol.DeviceState state) {
