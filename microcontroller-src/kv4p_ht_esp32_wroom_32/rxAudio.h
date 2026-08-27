@@ -178,9 +178,12 @@ private:
 bool rxStreamConfigured = false;
 AnalogAudioStream in;
 AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
-// Compensate for the measured ESP32 ADC/I2S sample-clock error so the radio
-// discriminator stream arrives at the modem near its nominal 48 kHz rate.
-static const uint32_t RX_ADC_SAMPLE_RATE = 48400;
+// The ESP32 ADC/I2S clock was measured about 400 samples/s slow. Request the
+// nominal 48 kHz rate plus that correction so the captured stream is near
+// 48 kHz in real time; the DSP and wire formats remain 48 kHz.
+static const uint32_t RX_ADC_SAMPLE_RATE_CORRECTION = 400;
+static const uint32_t RX_ADC_SAMPLE_RATE =
+    AUDIO_SAMPLE_RATE + RX_ADC_SAMPLE_RATE_CORRECTION;
 AudioInfo rxAudioInfo(AUDIO_WIRE_SAMPLE_RATE, 1, 16);
 SerialOutput rxAudioOutput;
 ADPCMEncoder rxAdpcmEncoder(AV_CODEC_ID_ADPCM_IMA_WAV, AUDIO_FRAME_BYTES);
