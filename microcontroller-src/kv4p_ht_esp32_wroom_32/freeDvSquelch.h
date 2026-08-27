@@ -31,18 +31,18 @@ public:
       BAD_FRAMES_TO_CLOSE * FRAME_DURATION_MS;
 
   // Map calibrated FreeDV discriminator SNR onto Codec2Talkie's VHF
-  // S1..S9+10 range, then encode it in KV4P's SA818 RSSI wire format.
+  // S0..S9+10 range, then encode it in KV4P's SA818 RSSI wire format.
   static uint8_t snrToRssi(float snrDb) {
     static constexpr float NOISE_SNR_DB = 4.46f;
     static constexpr float S9_SNR_DB = 17.0f;
     static constexpr float IDEAL_SNR_DB = 41.91f;
     float equivalentDbm;
     if (snrDb <= NOISE_SNR_DB) {
-      equivalentDbm = -141.0f;
+      equivalentDbm = -147.0f;
     } else if (snrDb < S9_SNR_DB) {
       const float level =
           (snrDb - NOISE_SNR_DB) / (S9_SNR_DB - NOISE_SNR_DB);
-      equivalentDbm = -141.0f + level * 48.0f;
+      equivalentDbm = -147.0f + level * 54.0f;
     } else if (snrDb < IDEAL_SNR_DB) {
       const float level =
           (snrDb - S9_SNR_DB) / (IDEAL_SNR_DB - S9_SNR_DB);

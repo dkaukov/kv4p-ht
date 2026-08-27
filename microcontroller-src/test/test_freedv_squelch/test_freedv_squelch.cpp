@@ -20,10 +20,10 @@ void test_no_frame_timeout_matches_close_hysteresis() {
 }
 
 void test_snr_maps_to_codec2talkie_equivalent_rssi() {
-  TEST_ASSERT_EQUAL_UINT8(17, FreeDvSquelch::snrToRssi(4.46f));
+  TEST_ASSERT_EQUAL_UINT8(12, FreeDvSquelch::snrToRssi(4.46f));
   TEST_ASSERT_EQUAL_UINT8(57, FreeDvSquelch::snrToRssi(17.0f));
   TEST_ASSERT_EQUAL_UINT8(65, FreeDvSquelch::snrToRssi(41.91f));
-  TEST_ASSERT_EQUAL_UINT8(17, FreeDvSquelch::snrToRssi(-100.0f));
+  TEST_ASSERT_EQUAL_UINT8(12, FreeDvSquelch::snrToRssi(-100.0f));
   TEST_ASSERT_EQUAL_UINT8(65, FreeDvSquelch::snrToRssi(300.0f));
 }
 
