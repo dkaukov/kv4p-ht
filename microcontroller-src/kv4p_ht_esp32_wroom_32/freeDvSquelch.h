@@ -23,8 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 class FreeDvSquelch {
 public:
-  static constexpr uint8_t GOOD_FRAMES_TO_OPEN = 10;
-  static constexpr uint8_t BAD_FRAMES_TO_CLOSE = 20;
+  static constexpr uint8_t GOOD_FRAMES_TO_OPEN = 5;
+  static constexpr uint8_t BAD_FRAMES_TO_CLOSE = 10;
   static constexpr uint32_t FRAME_DURATION_MS =
       freedv2400b::TX_SAMPLES * 1000UL / freedv2400b::SAMPLE_RATE;
   static constexpr uint32_t NO_FRAME_TIMEOUT_MS =
