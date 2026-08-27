@@ -1574,9 +1574,9 @@ public class RadioAudioService extends Service {
 
     private void syncFreeDvModeFromDevice() {
         boolean enabled = radioModule.isFreeDv2400bEnabled();
+        if (enabled && codec2 == null) codec2 = new Codec2();
         if (freeDv2400bEnabled == enabled) return;
 
-        if (enabled && codec2 == null) codec2 = new Codec2();
         freeDv2400bEnabled = enabled;
         codec2TxSamples = 0;
         codec2HasPendingInput = false;
