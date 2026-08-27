@@ -15,7 +15,10 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
-            cmake { cppFlags "-std=c++17" }
+            cmake {
+                cppFlags "-std=c++17"
+                targets "kv4p-codec2"
+            }
         }
 
         javaCompileOptions {
