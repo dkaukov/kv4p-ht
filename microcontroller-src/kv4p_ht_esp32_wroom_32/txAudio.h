@@ -103,7 +103,7 @@ FreeDv2400bModulator freeDvTx(onFreeDvTxSamples);
 int16_t freeDvTxScratch[256];
 
 void initI2STx() {  
-  freeDvTx.setMagnitude(16383 / 4);
+  freeDvTx.setMagnitude(16383);
   auto config = out.defaultConfig(TX_MODE);
   config.copyFrom(txInfo);
   config.pin_data = hw.pins.pinAudioOut;
