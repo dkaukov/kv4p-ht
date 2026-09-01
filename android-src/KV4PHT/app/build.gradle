@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.vagell.kv4pht'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.vagell.kv4pht"
         minSdk 26
-        targetSdk 35
+        targetSdk 36
         versionCode 54
         versionName "2.0.0.1"
 
