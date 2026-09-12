@@ -397,62 +397,7 @@ public class RadioAudioService extends Service {
     public void onCreate() {
         super.onCreate();
         aprsExecutor = Executors.newSingleThreadExecutor();
-        AppDatabase database = AppDatabase.getInstance(getApplicationContext());
-        aprsController = new AprsController(new AprsController.RoomPacketRepository(
-            database.aprsPacketDao()), new AprsController.RoomEventRepository(
-            database.aprsEventDao()), aprsExecutor,
-            new AprsController.Callbacks() {
-                @Override public String getCallsign() { return callsign; }
-                @Override public void showNotification(String title, String message) {
-                    callbacks.showNotification(MESSAGE_NOTIFICATION_CHANNEL_ID, MESSAGE_NOTIFICATION_TO_YOU_ID,
-                        title, message, INTENT_OPEN_CHAT);
-                }
-                @Override public void sendAcknowledgement(String destination, String messageIdentifier,
-                                                          long eventId) {
-                    handler.postDelayed(() -> sendAckMessage(destination, messageIdentifier, eventId),
-                        1000);
-                }
-                @Override public AprsController.Transmission retryMessage(AprsEvent event) {
-                    if (!isTxAllowed() || getMode() != RadioMode.RX || hostToEsp32 == null) {
-                        return null;
-                    }
-                    try {
-                        APRSPacket packet = new APRSPacket(event.fromCallsign, DEFAULT_DIGIPEATERS,
-                            MessagePacket.createMessagePayload(event.toCallsign, event.body,
-                                event.messageIdentifier));
-                        byte[] rawAx25 = packet.toAX25Frame();
-                        return txAX25Packet(new Packet(rawAx25))
-                            ? new AprsController.Transmission(packet, activeFrequencyHz(), rawAx25)
-                            : null;
-                    } catch (IllegalArgumentException e) {
-                        Log.w(TAG, "Unable to retry APRS message", e);
-                        return null;
-                    }
-                }
-                @Override public void requestPositionBeacon() {
-                    handler.post(() -> {
-                        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                                != PackageManager.PERMISSION_GRANTED
-                                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
-                                != PackageManager.PERMISSION_GRANTED) {
-                            callbacks.unknownLocation();
-                            return;
-                        }
-                        try {
-                            acquireBeaconWakeLock();
-                            sendPositionBeacon();
-                        } finally {
-                            releaseBeaconWakeLock();
-                        }
-                    });
-                }
-                @Override public AprsController.Transmission transmitDigipeatedPacket(APRSPacket packet) {
-                    if (!isTxAllowed() || getMode() != RadioMode.RX || hostToEsp32 == null) return null;
-                    byte[] rawAx25 = packet.toAX25Frame();
-                    return txAX25Packet(new Packet(rawAx25))
-                        ? new AprsController.Transmission(packet, activeFrequencyHz(), rawAx25) : null;
-                }
-            });
+        aprsController = createAprsController();
 
         // Keep CPU on while service is running so we can play and process audio
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -474,6 +419,74 @@ public class RadioAudioService extends Service {
         }
 
         messageNumber = messageNumberRandom.nextInt(APRS_MAX_MESSAGE_NUM); // Start with any Message # from 0-99999, we'll increment it by 1 each tx until restart.
+    }
+
+    private AprsController createAprsController() {
+        AppDatabase database = AppDatabase.getInstance(getApplicationContext());
+        return new AprsController(new AprsController.RoomPacketRepository(database.aprsPacketDao()),
+            new AprsController.RoomEventRepository(database.aprsEventDao()), aprsExecutor,
+            new ServiceAprsCallbacks());
+    }
+
+    private final class ServiceAprsCallbacks implements AprsController.Callbacks {
+        @Override public String getCallsign() {
+            return callsign;
+        }
+
+        @Override public void showNotification(String title, String message) {
+            callbacks.showNotification(MESSAGE_NOTIFICATION_CHANNEL_ID, MESSAGE_NOTIFICATION_TO_YOU_ID,
+                title, message, INTENT_OPEN_CHAT);
+        }
+
+        @Override public void sendAcknowledgement(String destination, String messageIdentifier,
+                                                  long eventId) {
+            handler.postDelayed(() -> sendAckMessage(destination, messageIdentifier, eventId), 1000);
+        }
+
+        @Override public AprsController.Transmission retryMessage(AprsEvent event) {
+            if (!canTransmitAprs()) return null;
+            try {
+                APRSPacket packet = new APRSPacket(event.fromCallsign, DEFAULT_DIGIPEATERS,
+                    MessagePacket.createMessagePayload(event.toCallsign, event.body,
+                        event.messageIdentifier));
+                return transmitAprsPacket(packet);
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Unable to retry APRS message", e);
+                return null;
+            }
+        }
+
+        @Override public void requestPositionBeacon() {
+            handler.post(() -> {
+                if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED
+                        || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    callbacks.unknownLocation();
+                    return;
+                }
+                try {
+                    acquireBeaconWakeLock();
+                    sendPositionBeacon();
+                } finally {
+                    releaseBeaconWakeLock();
+                }
+            });
+        }
+
+        @Override public AprsController.Transmission transmitDigipeatedPacket(APRSPacket packet) {
+            return canTransmitAprs() ? transmitAprsPacket(packet) : null;
+        }
+    }
+
+    private boolean canTransmitAprs() {
+        return isTxAllowed() && getMode() == RadioMode.RX && hostToEsp32 != null;
+    }
+
+    private AprsController.Transmission transmitAprsPacket(APRSPacket packet) {
+        byte[] rawAx25 = packet.toAX25Frame();
+        return txAX25Packet(new Packet(rawAx25))
+            ? new AprsController.Transmission(packet, activeFrequencyHz(), rawAx25) : null;
     }
 
     /**

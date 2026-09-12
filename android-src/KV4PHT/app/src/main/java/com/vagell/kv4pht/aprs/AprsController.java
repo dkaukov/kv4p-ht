@@ -213,43 +213,56 @@ public final class AprsController {
     }
 
     private void persistIncoming(AprsPacket packet, ParsedEvent parsed, Transmission digipeated) {
-        AprsEvent event = null;
-        boolean created = false;
-        if (parsed != null && (parsed.acknowledgement || parsed.rejection)) {
-            event = eventRepository.findPendingOutgoingEvent(parsed.targetCallsign,
-                parsed.fromCallsign, parsed.messageIdentifier);
-            if (event != null) {
-                event.deliveryState = parsed.acknowledgement
-                    ? AprsEvent.DELIVERY_DELIVERED : AprsEvent.DELIVERY_REJECTED;
-                event.nextRetryAtMs = null;
-                associatePacket(event, packet);
-            } else {
-                packetRepository.insert(packet);
-            }
-        } else if (parsed != null && parsed.event != null) {
-            AprsEvent candidate = parsed.event;
-            event = eventRepository.findRecentByDedupKey(candidate.dedupKey,
-                candidate.lastSeenMs - DUPLICATE_WINDOW_MS);
-            if (event == null) {
-                candidate.packetCount = 1;
-                candidate.id = eventRepository.insert(candidate);
-                event = candidate;
-                created = true;
-                packet.eventId = event.id;
-                packetRepository.insert(packet);
-            } else {
-                mergeObservation(event, candidate);
-                associatePacket(event, packet);
-            }
-            if (event.type == AprsEvent.MESSAGE_TYPE) notifyAndAcknowledge(event, created);
-        } else {
-            packetRepository.insert(packet);
-        }
-
+        AprsEvent event = persistPacket(packet, parsed);
         if (digipeated != null) {
             recordTransmissionNow(event == null ? null : event.id, digipeated);
         }
         refreshEvents();
+    }
+
+    private AprsEvent persistPacket(AprsPacket packet, ParsedEvent parsed) {
+        if (parsed == null) {
+            packetRepository.insert(packet);
+            return null;
+        }
+        if (parsed.acknowledgement || parsed.rejection) {
+            return persistDeliveryResponse(packet, parsed);
+        }
+        if (parsed.event != null) return persistEvent(packet, parsed.event);
+        packetRepository.insert(packet);
+        return null;
+    }
+
+    private AprsEvent persistDeliveryResponse(AprsPacket packet, ParsedEvent response) {
+        AprsEvent event = eventRepository.findPendingOutgoingEvent(response.targetCallsign,
+            response.fromCallsign, response.messageIdentifier);
+        if (event == null) {
+            packetRepository.insert(packet);
+            return null;
+        }
+        event.deliveryState = response.acknowledgement
+            ? AprsEvent.DELIVERY_DELIVERED : AprsEvent.DELIVERY_REJECTED;
+        event.nextRetryAtMs = null;
+        associatePacket(event, packet);
+        return event;
+    }
+
+    private AprsEvent persistEvent(AprsPacket packet, AprsEvent candidate) {
+        AprsEvent event = eventRepository.findRecentByDedupKey(candidate.dedupKey,
+            candidate.lastSeenMs - DUPLICATE_WINDOW_MS);
+        boolean created = event == null;
+        if (created) {
+            candidate.packetCount = 1;
+            candidate.id = eventRepository.insert(candidate);
+            event = candidate;
+            packet.eventId = event.id;
+            packetRepository.insert(packet);
+        } else {
+            mergeObservation(event, candidate);
+            associatePacket(event, packet);
+        }
+        if (event.type == AprsEvent.MESSAGE_TYPE) notifyAndAcknowledge(event, created);
+        return event;
     }
 
     private void mergeObservation(AprsEvent event, AprsEvent observation) {
@@ -467,25 +480,47 @@ public final class AprsController {
     private void applyPayload(AprsEvent event, APRSPacket packet, InformationField info,
                               ObjectField object, WeatherField weather) {
         if (weather != null) {
-            event.type = AprsEvent.WEATHER_TYPE;
-            event.temperature = weather.getTemp() == null ? 0 : weather.getTemp();
-            event.humidity = weather.getHumidity() == null ? 0 : weather.getHumidity();
-            event.pressure = weather.getPressure() == null ? 0 : weather.getPressure();
-            event.rain = weather.getRainLast24Hours() == null ? 0 : weather.getRainLast24Hours();
-            event.snow = weather.getSnowfallLast24Hours() == null ? 0 : weather.getSnowfallLast24Hours();
-            event.windForce = weather.getWindSpeed() == null ? 0 : weather.getWindSpeed();
-            event.windDirection = weather.getWindDirection() == null ? ""
-                : Utilities.degressToCardinal(weather.getWindDirection());
-        } else if (info.getDataTypeIdentifier() == ';') {
-            event.type = AprsEvent.OBJECT_TYPE;
-            if (object != null) event.objectName = object.getObjectName();
-        } else if (info.getDataTypeIdentifier() == ':') {
-            event.type = AprsEvent.MESSAGE_TYPE;
-            MessagePacket message = new MessagePacket(info.getRawBytes(), packet.getDestinationCall());
-            event.toCallsign = message.getTargetCallsign();
-            event.messageIdentifier = message.getMessageNumber();
-            event.body = message.getMessageBody();
+            applyWeather(event, weather);
+            return;
         }
+        if (info.getDataTypeIdentifier() == ';') applyObject(event, object);
+        if (info.getDataTypeIdentifier() == ':') applyMessage(event, packet, info);
+    }
+
+    private void applyWeather(AprsEvent event, WeatherField weather) {
+        event.type = AprsEvent.WEATHER_TYPE;
+        event.temperature = valueOrZero(weather.getTemp());
+        event.humidity = valueOrZero(weather.getHumidity());
+        event.pressure = valueOrZero(weather.getPressure());
+        event.rain = valueOrZero(weather.getRainLast24Hours());
+        event.snow = valueOrZero(weather.getSnowfallLast24Hours());
+        event.windForce = valueOrZero(weather.getWindSpeed());
+        event.windDirection = cardinalDirection(weather.getWindDirection());
+    }
+
+    private void applyObject(AprsEvent event, ObjectField object) {
+        event.type = AprsEvent.OBJECT_TYPE;
+        if (object != null) event.objectName = object.getObjectName();
+    }
+
+    private void applyMessage(AprsEvent event, APRSPacket packet, InformationField info) {
+        event.type = AprsEvent.MESSAGE_TYPE;
+        MessagePacket message = new MessagePacket(info.getRawBytes(), packet.getDestinationCall());
+        event.toCallsign = message.getTargetCallsign();
+        event.messageIdentifier = message.getMessageNumber();
+        event.body = message.getMessageBody();
+    }
+
+    private double valueOrZero(Double value) {
+        return value == null ? 0 : value;
+    }
+
+    private int valueOrZero(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private String cardinalDirection(Integer direction) {
+        return direction == null ? "" : Utilities.degressToCardinal(direction);
     }
 
     private String dedupKey(AprsEvent event) {

@@ -385,8 +385,10 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private String destinationFilterLabel(String value) {
-        return value != null && AprsController.DESTINATION_MINE.equalsIgnoreCase(value)
-            ? getString(R.string.mine) : getString(R.string.all);
+        if (value != null && AprsController.DESTINATION_MINE.equalsIgnoreCase(value)) {
+            return getString(R.string.mine);
+        }
+        return getString(R.string.all);
     }
 
     public void closedCaptionsButtonClicked(View view) {
