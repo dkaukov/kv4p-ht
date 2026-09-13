@@ -331,18 +331,6 @@ public class RadioAudioService extends Service {
         return aprsController.isPositionBeaconingEnabled();
     }
 
-    private void acquireBeaconWakeLock() {
-        if (wakeLock != null && !wakeLock.isHeld()) {
-            wakeLock.acquire(20_000);
-        }
-    }
-
-    private void releaseBeaconWakeLock() {
-        if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
-        }
-    }
-
     public void setMode(RadioMode mode) {
         if (mode == RadioMode.FLASHING) {
             if (!canFlashFirmware()) {
@@ -483,16 +471,28 @@ public class RadioAudioService extends Service {
         @Override public AprsController.Transmission transmitDigipeatedPacket(APRSPacket packet) {
             return canTransmitAprs() ? transmitAprsPacket(packet) : null;
         }
-    }
 
-    private boolean canTransmitAprs() {
-        return isTxAllowed() && getMode() == RadioMode.RX && hostToEsp32 != null;
-    }
+        private void acquireBeaconWakeLock() {
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(20_000);
+            }
+        }
 
-    private AprsController.Transmission transmitAprsPacket(APRSPacket packet) {
-        byte[] rawAx25 = packet.toAX25Frame();
-        return txAX25Packet(new Packet(rawAx25))
-            ? new AprsController.Transmission(packet, activeFrequencyHz(), rawAx25) : null;
+        private void releaseBeaconWakeLock() {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        }
+
+        private boolean canTransmitAprs() {
+            return isTxAllowed() && getMode() == RadioMode.RX && hostToEsp32 != null;
+        }
+
+        private AprsController.Transmission transmitAprsPacket(APRSPacket packet) {
+            byte[] rawAx25 = packet.toAX25Frame();
+            return txAX25Packet(new Packet(rawAx25))
+                ? new AprsController.Transmission(packet, activeFrequencyHz(), rawAx25) : null;
+        }
     }
 
     /**
