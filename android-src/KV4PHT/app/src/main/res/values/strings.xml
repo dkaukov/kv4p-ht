@@ -110,7 +110,9 @@
     <string name="freq_145_8250" translatable="false">145.8250</string>
     <string name="aprs_my_position_icon">My position icon</string>
     <string name="aprs_history_window">History</string>
-    <string name="aprs_message_filter">Messages</string>
+    <string name="aprs_message_filter">Message filter</string>
+    <string name="aprs_show_all">Show all</string>
+    <string name="aprs_only_mine">Only mine</string>
     <string name="all">All</string>
     <string name="mine">Mine</string>
     <string name="aprs_icon_phone">Phone</string>

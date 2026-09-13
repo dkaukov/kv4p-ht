@@ -237,7 +237,7 @@ public class SettingsActivity extends AppCompatActivity {
         setDropdownOptions(R.id.aprsHistoryWindowTextView, List.of(
             "1d", "1w", "2w", "1m", getString(R.string.all)));
         setDropdownOptions(R.id.aprsDestinationFilterTextView, List.of(
-            getString(R.string.all), getString(R.string.mine)));
+            getString(R.string.aprs_show_all), getString(R.string.aprs_only_mine)));
     }
 
     private void populateAprsFrequencies() {
@@ -386,9 +386,9 @@ public class SettingsActivity extends AppCompatActivity {
 
     private String destinationFilterLabel(String value) {
         if (value != null && AprsController.DESTINATION_MINE.equalsIgnoreCase(value)) {
-            return getString(R.string.mine);
+            return getString(R.string.aprs_only_mine);
         }
-        return getString(R.string.all);
+        return getString(R.string.aprs_show_all);
     }
 
     public void closedCaptionsButtonClicked(View view) {
@@ -521,7 +521,7 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void setAprsDestinationFilter(String destinationFilter) {
-        String value = getString(R.string.mine).equals(destinationFilter)
+        String value = getString(R.string.aprs_only_mine).equals(destinationFilter)
             ? AprsController.DESTINATION_MINE : AprsController.DESTINATION_ALL;
         saveAppSettingAsync(AppSetting.SETTING_APRS_DESTINATION_FILTER, value);
         if (radioAudioService != null) {
