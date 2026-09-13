@@ -175,6 +175,7 @@ public class RadioAudioService extends Service {
     private AudioTrack audioTrack;
     private float audioTrackVolume = 0.0f;
     private AudioFocusRequest audioFocusRequest;
+    private boolean hasAudioFocus = false;
     private final byte[] txAudioFrame = new byte[AUDIO_FRAME_BYTES];
     private final ImaAdpcm.Encoder txAudioEncoder = new ImaAdpcm.Encoder();
     private Codec2 codec2;
@@ -408,6 +409,11 @@ public class RadioAudioService extends Service {
         this.mode = mode;
         if (previousMode != mode) {
             syncFirmwareAudioStateForMode(mode);
+            if ((mode == RadioMode.RX || mode == RadioMode.SCAN) && radioModule.hasRadioConfig()) {
+                updateAudioFocusForSquelch(radioModule.isSquelched());
+            } else {
+                abandonAudioFocus();
+            }
         }
     }
 
@@ -642,6 +648,7 @@ public class RadioAudioService extends Service {
             codec2.close();
             codec2 = null;
         }
+        abandonAudioFocus();
         stopVoiceCapture();
 
         if (wakeLock != null && wakeLock.isHeld()) {
@@ -842,9 +849,9 @@ public class RadioAudioService extends Service {
         }
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build();
-        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(audioAttributes)
             .build();
         audioTrack = new AudioTrack.Builder()
@@ -1003,6 +1010,7 @@ public class RadioAudioService extends Service {
     private void closePortAndReset() {
         waitingForHello = false;
         cancelHelloTimeout();
+        abandonAudioFocus();
         radioModule.detachSender();
         hostToEsp32 = null;
         RadioTransport transport = activeTransport;
@@ -1658,7 +1666,9 @@ public class RadioAudioService extends Service {
         syncFreeDvModeFromDevice();
         syncActiveRadioConfig(state);
         final boolean deviceTxActive = radioModule.isDeviceTxActive();
-        callbacks.moduleStateChanged(deviceTxActive, radioModule.isSquelched());
+        final boolean squelched = radioModule.isSquelched();
+        callbacks.moduleStateChanged(deviceTxActive, squelched);
+        updateAudioFocusForSquelch(squelched);
         if (radioModule.isAppliedStateInSync() && radioModule.getTxFrequency() > 0) {
             updateTxAllowed(radioModule.getTxFrequency());
         }
@@ -1724,9 +1734,7 @@ public class RadioAudioService extends Service {
         int decoded = ImaAdpcm.decodeBlock(param.array(), offset, len, pcm16, 0, AUDIO_FRAME_SAMPLES);
 
         if ((getMode() == RadioMode.RX || getMode() == RadioMode.SCAN) && audioTrack != null) {
-            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             audioTrack.write(pcm16, 0, decoded, AudioTrack.WRITE_NON_BLOCKING);
-            audioManager.requestAudioFocus(audioFocusRequest);
             ensureAudioPlaying();
         }
     }
@@ -1747,9 +1755,35 @@ public class RadioAudioService extends Service {
         }
         if ((getMode() == RadioMode.RX || getMode() == RadioMode.SCAN) && audioTrack != null) {
             audioTrack.write(codec2PlaybackPcm, 0, codec2PlaybackPcm.length, AudioTrack.WRITE_NON_BLOCKING);
-            ((AudioManager) getSystemService(Context.AUDIO_SERVICE)).requestAudioFocus(audioFocusRequest);
+            requestAudioFocus();
             ensureAudioPlaying();
         }
+    }
+
+    private void updateAudioFocusForSquelch(boolean squelched) {
+        if (!squelched && (getMode() == RadioMode.RX || getMode() == RadioMode.SCAN)) {
+            requestAudioFocus();
+        } else {
+            abandonAudioFocus();
+        }
+    }
+
+    private void requestAudioFocus() {
+        if (hasAudioFocus || audioFocusRequest == null) {
+            return;
+        }
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        hasAudioFocus = audioManager.requestAudioFocus(audioFocusRequest)
+            == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    private void abandonAudioFocus() {
+        if (!hasAudioFocus || audioFocusRequest == null) {
+            return;
+        }
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        audioManager.abandonAudioFocusRequest(audioFocusRequest);
+        hasAudioFocus = false;
     }
 
     /**
