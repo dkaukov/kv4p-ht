@@ -144,6 +144,11 @@
         <item>High</item>
         <item>Low</item>
     </string-array>
+    <string name="voice_mode">Voice mode</string>
+    <string-array name="voice_mode_options">
+        <item>Analog</item>
+        <item>FreeDV 2400B</item>
+    </string-array>
     <string name="mhz">MHz</string>
     <string name="flash_firmware_title">Flash firmware?</string>
     <string name="flash_firmware_message">This will replace the firmware on your kv4p HT.</string>

@@ -122,6 +122,11 @@
         <item>High</item>
         <item>Low</item>
     </string-array>
+    <string name="voice_mode">Voice mode</string>
+    <string-array name="voice_mode_options">
+        <item>Analog</item>
+        <item>FreeDV 2400B</item>
+    </string-array>
     <string name="mhz">MHz</string>
     <string name="app_version">应用版本</string>
     <string name="firmware_version">固件版本</string>
