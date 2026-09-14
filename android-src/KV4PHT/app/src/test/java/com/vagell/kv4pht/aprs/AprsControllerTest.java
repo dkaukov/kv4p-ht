@@ -458,10 +458,13 @@ public class AprsControllerTest {
         assertTrue(older.lastSeenMs > newer.lastSeenMs);
     }
 
-    @Test public void mineFilterKeepsBroadcastsMessagesToMeAndNonMessageEvents() {
+    @Test public void mineFilterKeepsIncomingOutgoingBroadcastAndNonMessageEvents() {
         Fixture f = fixture();
         long now = System.currentTimeMillis();
         f.events.records.add(messageEvent("VK3ME", "mine", now));
+        AprsEvent outgoing = messageEvent("VK3ABC", "outgoing", now);
+        outgoing.fromCallsign = "VK3ME";
+        f.events.records.add(outgoing);
         f.events.records.add(messageEvent("VK3OTHER", "other", now));
         f.events.records.add(messageEvent("BLN1CQ", "bulletin", now));
         f.events.records.add(messageEvent("QST", "qst", now));
@@ -472,7 +475,8 @@ public class AprsControllerTest {
         f.controller.setDestinationFilter(AprsController.DESTINATION_MINE);
 
         List<AprsEvent> visible = f.controller.getEvents().getValue();
-        assertEquals(6, visible.size());
+        assertEquals(7, visible.size());
+        assertTrue(visible.stream().anyMatch(event -> "outgoing".equals(event.body)));
         assertFalse(visible.stream().anyMatch(event -> "other".equals(event.body)));
     }
 
@@ -615,6 +619,7 @@ public class AprsControllerTest {
                     || destination.equals("ALL") || destination.equals("QST")
                     || destination.equals("CQ"));
                 if (!mineOnly || event.type != AprsEvent.MESSAGE_TYPE
+                        || localCallsign.equals(event.fromCallsign)
                         || localCallsign.equals(destination) || broadcast) visible.add(event);
             }
             visible.sort(Comparator.comparingLong((AprsEvent event) -> event.firstSeenMs)

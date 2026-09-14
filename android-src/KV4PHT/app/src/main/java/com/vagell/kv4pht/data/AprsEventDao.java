@@ -26,21 +26,15 @@ import java.util.List;
 
 @Dao
 public interface AprsEventDao {
-    String MESSAGE_DESTINATION_BRANCH = "UNION ALL SELECT * FROM aprs_events "
-        + "WHERE type = :messageType AND to_callsign ";
-    String WITHIN_WINDOW = " AND first_seen_ms >= :sinceMs ";
-
     @Query("SELECT * FROM (SELECT * FROM aprs_events WHERE first_seen_ms >= :sinceMs "
         + "ORDER BY first_seen_ms DESC, id DESC LIMIT :limit) ORDER BY first_seen_ms, id")
     List<AprsEvent> getSince(long sinceMs, int limit);
 
     @Query("SELECT * FROM (SELECT * FROM aprs_events "
-        + "WHERE type != :messageType AND first_seen_ms >= :sinceMs "
-        + MESSAGE_DESTINATION_BRANCH + "= :localCallsign" + WITHIN_WINDOW
-        + MESSAGE_DESTINATION_BRANCH + "= 'ALL'" + WITHIN_WINDOW
-        + MESSAGE_DESTINATION_BRANCH + "= 'QST'" + WITHIN_WINDOW
-        + MESSAGE_DESTINATION_BRANCH + "= 'CQ'" + WITHIN_WINDOW
-        + MESSAGE_DESTINATION_BRANCH + ">= 'BLN' AND to_callsign < 'BLO'" + WITHIN_WINDOW
+        + "WHERE first_seen_ms >= :sinceMs AND (type != :messageType "
+        + "OR from_callsign = :localCallsign OR to_callsign = :localCallsign "
+        + "OR to_callsign IN ('ALL', 'QST', 'CQ') "
+        + "OR (to_callsign >= 'BLN' AND to_callsign < 'BLO')) "
         + "ORDER BY first_seen_ms DESC, id DESC LIMIT :limit) ORDER BY first_seen_ms, id")
     List<AprsEvent> getMineSince(long sinceMs, int messageType, String localCallsign, int limit);
 
