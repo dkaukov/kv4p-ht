@@ -35,6 +35,7 @@ import com.vagell.kv4pht.data.AprsEventDao;
 import com.vagell.kv4pht.data.AprsPacket;
 import com.vagell.kv4pht.data.AprsPacketDao;
 import com.vagell.kv4pht.data.AprsSource;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -492,7 +493,10 @@ public final class AprsController {
         applyPosition(event, position);
         applyComment(event, packet, info, position, object, weather);
         applyPayload(event, packet, info, object, weather);
-        if (packet.hasFault() || event.type == AprsEvent.UNKNOWN_TYPE) return null;
+        if (packet.hasFault()) return null;
+        if (event.type == AprsEvent.UNKNOWN_TYPE) {
+            event.comment = "Raw: " + new String(info.getRawBytes(), StandardCharsets.UTF_8);
+        }
         event.dedupKey = logicalPacketKey(packet);
         return ParsedEvent.event(event);
     }

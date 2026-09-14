@@ -131,12 +131,28 @@ public class AprsControllerTest {
         assertEquals(AprsEvent.OBJECT_TYPE, f.events.records.get(1).type);
     }
 
-    @Test public void unsupportedPacketIsStoredWithoutEvent() {
+    @Test public void validUnsupportedPacketCreatesUnknownEventWithRawText() {
         Fixture f = fixture();
         APRSPacket frame = packetWithPath("WIDE2-1");
 
         f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
 
+        assertEquals(1, f.packets.records.size());
+        assertEquals(1, f.events.records.size());
+        AprsEvent event = f.events.records.get(0);
+        assertEquals(AprsEvent.UNKNOWN_TYPE, event.type);
+        assertEquals("Raw: >test", event.comment);
+        assertEquals(Long.valueOf(event.id), f.packets.records.get(0).eventId);
+    }
+
+    @Test public void malformedPacketIsStoredWithoutEvent() throws Exception {
+        Fixture f = fixture();
+        APRSPacket malformed = Parser.parse("VK3ABC>APRS:Ainvalid");
+
+        f.controller.handle(malformed, AprsSource.RX_RF, 144_390_000L,
+            malformed.toAX25Frame());
+
+        assertTrue(malformed.hasFault());
         assertEquals(1, f.packets.records.size());
         assertNull(f.packets.records.get(0).eventId);
         assertTrue(f.events.records.isEmpty());
