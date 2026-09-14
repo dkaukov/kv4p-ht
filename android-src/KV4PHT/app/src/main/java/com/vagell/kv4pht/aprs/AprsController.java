@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -182,7 +183,7 @@ public final class AprsController {
     private final Map<String, Long> digipeatOutputCache = new ConcurrentHashMap<>();
     private volatile boolean positionBeaconingEnabled;
     private volatile long nextPositionBeaconAt;
-    private volatile long nextReliableRetryAt = RETRY_SCHEDULE_UNINITIALIZED;
+    private final AtomicLong nextReliableRetryAt = new AtomicLong(RETRY_SCHEDULE_UNINITIALIZED);
     private volatile boolean digipeatingEnabled;
     private volatile String historyWindow = HISTORY_ALL;
     private volatile String destinationFilter = DESTINATION_ALL;
@@ -342,7 +343,8 @@ public final class AprsController {
         executor.execute(() -> {
             boolean changed = false;
             initializeReliableRetrySchedule();
-            if (nextReliableRetryAt != NO_RETRY_SCHEDULED && now >= nextReliableRetryAt) {
+            long retryAt = nextReliableRetryAt.get();
+            if (retryAt != NO_RETRY_SCHEDULED && now >= retryAt) {
                 for (AprsEvent event : eventRepository.loadDueReliableEvents(now)) {
                     retryOrFail(event, now);
                     changed = true;
@@ -358,17 +360,20 @@ public final class AprsController {
     }
 
     private void initializeReliableRetrySchedule() {
-        if (nextReliableRetryAt == RETRY_SCHEDULE_UNINITIALIZED) reloadReliableRetrySchedule();
+        if (nextReliableRetryAt.get() == RETRY_SCHEDULE_UNINITIALIZED) {
+            reloadReliableRetrySchedule();
+        }
     }
 
     private void reloadReliableRetrySchedule() {
         Long retryAt = eventRepository.loadNextReliableRetryAt();
-        nextReliableRetryAt = retryAt == null ? NO_RETRY_SCHEDULED : retryAt;
+        nextReliableRetryAt.set(retryAt == null ? NO_RETRY_SCHEDULED : retryAt);
     }
 
     private void includeInReliableRetrySchedule(Long retryAt) {
-        if (retryAt == null || nextReliableRetryAt == RETRY_SCHEDULE_UNINITIALIZED) return;
-        nextReliableRetryAt = Math.min(nextReliableRetryAt, retryAt);
+        if (retryAt == null) return;
+        nextReliableRetryAt.updateAndGet(current -> current == RETRY_SCHEDULE_UNINITIALIZED
+            ? current : Math.min(current, retryAt));
     }
 
     public void setPositionBeaconingEnabled(boolean enabled, long now) {

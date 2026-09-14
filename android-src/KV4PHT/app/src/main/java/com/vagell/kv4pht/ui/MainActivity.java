@@ -269,6 +269,15 @@ public class MainActivity extends AppCompatActivity {
 
     /** Defines callbacks for service binding, passed to bindService(). */
     private ServiceConnection connection = new ServiceConnection() {
+        private boolean shouldAutoScrollAprs() {
+            int itemCount = aprsAdapter.getItemCount();
+            if (itemCount == 0) return true;
+            RecyclerView.LayoutManager layoutManager = aprsRecyclerView.getLayoutManager();
+            if (!(layoutManager instanceof LinearLayoutManager)) return false;
+            int lastVisible = ((LinearLayoutManager) layoutManager).findLastVisibleItemPosition();
+            return MainActivity.shouldAutoScrollAprs(itemCount, lastVisible);
+        }
+
         @Override
         public void onServiceConnected(ComponentName className,
                                        IBinder service) {
@@ -520,15 +529,6 @@ public class MainActivity extends AppCompatActivity {
             // TODO if this is unexpected we should probably try to restart the service.
         }
     };
-
-    private boolean shouldAutoScrollAprs() {
-        int itemCount = aprsAdapter.getItemCount();
-        if (itemCount == 0) return true;
-        RecyclerView.LayoutManager layoutManager = aprsRecyclerView.getLayoutManager();
-        if (!(layoutManager instanceof LinearLayoutManager)) return false;
-        int lastVisible = ((LinearLayoutManager) layoutManager).findLastVisibleItemPosition();
-        return shouldAutoScrollAprs(itemCount, lastVisible);
-    }
 
     static boolean shouldAutoScrollAprs(int itemCount, int lastVisibleItemPosition) {
         return itemCount == 0 || lastVisibleItemPosition != RecyclerView.NO_POSITION
