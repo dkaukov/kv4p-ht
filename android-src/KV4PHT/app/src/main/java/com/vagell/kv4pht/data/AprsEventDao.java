@@ -30,18 +30,19 @@ public interface AprsEventDao {
         + "WHERE type = :messageType AND to_callsign ";
     String WITHIN_WINDOW = " AND last_seen_ms >= :sinceMs ";
 
-    @Query("SELECT * FROM aprs_events WHERE last_seen_ms >= :sinceMs "
-        + "ORDER BY last_seen_ms, id")
-    List<AprsEvent> getSince(long sinceMs);
+    @Query("SELECT * FROM (SELECT * FROM aprs_events WHERE last_seen_ms >= :sinceMs "
+        + "ORDER BY last_seen_ms DESC, id DESC LIMIT :limit) ORDER BY last_seen_ms, id")
+    List<AprsEvent> getSince(long sinceMs, int limit);
 
-    @Query("SELECT * FROM aprs_events WHERE type != :messageType AND last_seen_ms >= :sinceMs "
+    @Query("SELECT * FROM (SELECT * FROM aprs_events "
+        + "WHERE type != :messageType AND last_seen_ms >= :sinceMs "
         + MESSAGE_DESTINATION_BRANCH + "= :localCallsign" + WITHIN_WINDOW
         + MESSAGE_DESTINATION_BRANCH + "= 'ALL'" + WITHIN_WINDOW
         + MESSAGE_DESTINATION_BRANCH + "= 'QST'" + WITHIN_WINDOW
         + MESSAGE_DESTINATION_BRANCH + "= 'CQ'" + WITHIN_WINDOW
         + MESSAGE_DESTINATION_BRANCH + ">= 'BLN' AND to_callsign < 'BLO'" + WITHIN_WINDOW
-        + "ORDER BY last_seen_ms, id")
-    List<AprsEvent> getMineSince(long sinceMs, int messageType, String localCallsign);
+        + "ORDER BY last_seen_ms DESC, id DESC LIMIT :limit) ORDER BY last_seen_ms, id")
+    List<AprsEvent> getMineSince(long sinceMs, int messageType, String localCallsign, int limit);
 
     @Query("SELECT * FROM aprs_events WHERE delivery_state = :pendingState "
         + "AND next_retry_at_ms IS NOT NULL AND next_retry_at_ms <= :now")

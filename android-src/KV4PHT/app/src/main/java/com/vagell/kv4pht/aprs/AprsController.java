@@ -66,7 +66,7 @@ public final class AprsController {
     private static final long[] RETRY_DELAYS_MS = {15_000L, 30_000L, 60_000L, 120_000L, 240_000L};
     private static final long FINAL_ACK_GRACE_MS = 30_000L;
     private static final long BEACON_INTERVAL_MS = 5 * 60_000L;
-    private static final long HISTORY_REFRESH_INTERVAL_MS = 60_000L;
+    private static final int MAX_VISIBLE_EVENTS = 5_000;
     private static final long DUPLICATE_WINDOW_MS = 30 * 60_000L;
     private static final long DIGIPEAT_DEDUP_MS = 28_000L;
 
@@ -77,7 +77,7 @@ public final class AprsController {
 
     /** Persistence boundary for user-visible APRS events and delivery state. */
     public interface EventRepository {
-        List<AprsEvent> loadEvents(long sinceMs, String localCallsign, boolean mineOnly);
+        List<AprsEvent> loadEvents(long sinceMs, String localCallsign, boolean mineOnly, int limit);
         List<AprsEvent> loadDueReliableEvents(long now);
         long insert(AprsEvent event);
         void update(AprsEvent event);
@@ -130,10 +130,10 @@ public final class AprsController {
         }
 
         @Override public List<AprsEvent> loadEvents(long sinceMs, String localCallsign,
-                                                    boolean mineOnly) {
+                                                    boolean mineOnly, int limit) {
             return mineOnly
-                ? dao.getMineSince(sinceMs, AprsEvent.MESSAGE_TYPE, localCallsign)
-                : dao.getSince(sinceMs);
+                ? dao.getMineSince(sinceMs, AprsEvent.MESSAGE_TYPE, localCallsign, limit)
+                : dao.getSince(sinceMs, limit);
         }
 
         @Override public List<AprsEvent> loadDueReliableEvents(long now) {
@@ -176,7 +176,6 @@ public final class AprsController {
     private volatile boolean digipeatingEnabled;
     private volatile String historyWindow = HISTORY_ALL;
     private volatile String destinationFilter = DESTINATION_ALL;
-    private volatile long nextHistoryRefreshAt = Long.MAX_VALUE;
 
     public AprsController(PacketRepository packetRepository, EventRepository eventRepository,
                           Executor executor, Callbacks callbacks) {
@@ -202,10 +201,7 @@ public final class AprsController {
     /** Selects how much event history is exposed to the normal APRS UI. */
     public void setHistoryWindow(String value) {
         historyWindow = normalizeHistoryWindow(value);
-        long now = System.currentTimeMillis();
-        nextHistoryRefreshAt = HISTORY_ALL.equals(historyWindow)
-            ? Long.MAX_VALUE : now + HISTORY_REFRESH_INTERVAL_MS;
-        refreshEvents(now);
+        refreshEvents();
     }
 
     /** Selects whether the UI shows every message destination or only local/broadcast traffic. */
@@ -343,11 +339,7 @@ public final class AprsController {
                 nextPositionBeaconAt = now + BEACON_INTERVAL_MS;
                 callbacks.requestPositionBeacon();
             }
-            if (!HISTORY_ALL.equals(historyWindow) && now >= nextHistoryRefreshAt) {
-                nextHistoryRefreshAt = now + HISTORY_REFRESH_INTERVAL_MS;
-                changed = true;
-            }
-            if (changed) refreshEvents(now);
+            if (changed) refreshEvents();
         });
     }
 
@@ -571,17 +563,13 @@ public final class AprsController {
     }
 
     private void refreshEvents() {
-        refreshEvents(System.currentTimeMillis());
-    }
-
-    private void refreshEvents(long now) {
-        long sinceMs = historyStartMs(historyWindow, now);
+        long sinceMs = historyStartMs(historyWindow, System.currentTimeMillis());
         String selectedDestination = destinationFilter;
         String localCallsign = callbacks.getCallsign();
         executor.execute(() -> {
             boolean mineOnly = DESTINATION_MINE.equals(selectedDestination);
             events.postValue(new ArrayList<>(eventRepository.loadEvents(
-                sinceMs, normalizeCallsign(localCallsign), mineOnly)));
+                sinceMs, normalizeCallsign(localCallsign), mineOnly, MAX_VISIBLE_EVENTS)));
         });
     }
 

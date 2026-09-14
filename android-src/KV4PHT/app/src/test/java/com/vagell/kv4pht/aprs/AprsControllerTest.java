@@ -35,6 +35,7 @@ import com.vagell.kv4pht.data.AprsSource;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import org.junit.Rule;
 import org.junit.Test;
@@ -321,14 +322,28 @@ public class AprsControllerTest {
         assertEquals(1, f.events.dueLoadCount);
     }
 
-    @Test public void finiteHistoryWindowRefreshesAsEventsAgeOut() {
+    @Test public void finiteHistoryWindowDoesNotRefreshOnIdleTick() {
         Fixture f = fixture();
         f.controller.setHistoryWindow(AprsController.HISTORY_ONE_DAY);
         int loadsAfterSelection = f.events.loadCount;
 
         f.controller.tick(Long.MAX_VALUE);
 
-        assertEquals(loadsAfterSelection + 1, f.events.loadCount);
+        assertEquals(loadsAfterSelection, f.events.loadCount);
+    }
+
+    @Test public void historyLoadKeepsOnlyNewestFiveThousandEvents() {
+        Fixture f = fixture();
+        for (int i = 0; i < 5_001; i++) {
+            f.events.records.add(eventAt("event " + i, i + 1L));
+        }
+
+        f.controller.setHistoryWindow(AprsController.HISTORY_ALL);
+
+        List<AprsEvent> visible = f.controller.getEvents().getValue();
+        assertEquals(5_000, visible.size());
+        assertEquals("event 1", visible.get(0).comment);
+        assertEquals("event 5000", visible.get(visible.size() - 1).comment);
     }
 
     @Test public void everyHistoryWindowLimitsEventsByLastSeenTime() {
@@ -500,7 +515,7 @@ public class AprsControllerTest {
         int dueLoadCount;
 
         @Override public List<AprsEvent> loadEvents(long sinceMs, String localCallsign,
-                                                    boolean mineOnly) {
+                                                    boolean mineOnly, int limit) {
             loadCount++;
             List<AprsEvent> visible = new ArrayList<>();
             for (AprsEvent event : records) {
@@ -512,7 +527,10 @@ public class AprsControllerTest {
                 if (!mineOnly || event.type != AprsEvent.MESSAGE_TYPE
                         || localCallsign.equals(destination) || broadcast) visible.add(event);
             }
-            return visible;
+            visible.sort(Comparator.comparingLong((AprsEvent event) -> event.lastSeenMs)
+                .thenComparingLong(event -> event.id));
+            int firstVisible = Math.max(0, visible.size() - limit);
+            return new ArrayList<>(visible.subList(firstVisible, visible.size()));
         }
 
         @Override public List<AprsEvent> loadDueReliableEvents(long now) {
