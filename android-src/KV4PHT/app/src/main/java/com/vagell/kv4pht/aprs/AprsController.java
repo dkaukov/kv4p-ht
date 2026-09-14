@@ -70,6 +70,8 @@ public final class AprsController {
     private static final long EVENT_DUPLICATE_WINDOW_MS = 30_000L;
     private static final long NUMBERED_MESSAGE_DUPLICATE_WINDOW_MS = 30 * 60_000L;
     private static final long DIGIPEAT_DEDUP_MS = 28_000L;
+    private static final long RETRY_SCHEDULE_UNINITIALIZED = Long.MIN_VALUE;
+    private static final long NO_RETRY_SCHEDULED = Long.MAX_VALUE;
 
     /** Persistence boundary for immutable packet history. */
     public interface PacketRepository {
@@ -80,6 +82,7 @@ public final class AprsController {
     public interface EventRepository {
         List<AprsEvent> loadEvents(long sinceMs, String localCallsign, boolean mineOnly, int limit);
         List<AprsEvent> loadDueReliableEvents(long now);
+        Long loadNextReliableRetryAt();
         long insert(AprsEvent event);
         void update(AprsEvent event);
         AprsEvent findById(long id);
@@ -141,6 +144,10 @@ public final class AprsController {
             return dao.getDueReliableEvents(AprsEvent.DELIVERY_PENDING, now);
         }
 
+        @Override public Long loadNextReliableRetryAt() {
+            return dao.getNextReliableRetryAt(AprsEvent.DELIVERY_PENDING);
+        }
+
         @Override public long insert(AprsEvent event) {
             return dao.insert(event);
         }
@@ -174,6 +181,7 @@ public final class AprsController {
     private final Map<String, Long> digipeatOutputCache = new ConcurrentHashMap<>();
     private volatile boolean positionBeaconingEnabled;
     private volatile long nextPositionBeaconAt;
+    private volatile long nextReliableRetryAt = RETRY_SCHEDULE_UNINITIALIZED;
     private volatile boolean digipeatingEnabled;
     private volatile String historyWindow = HISTORY_ALL;
     private volatile String destinationFilter = DESTINATION_ALL;
@@ -332,9 +340,13 @@ public final class AprsController {
     public void tick(long now) {
         executor.execute(() -> {
             boolean changed = false;
-            for (AprsEvent event : eventRepository.loadDueReliableEvents(now)) {
-                retryOrFail(event, now);
-                changed = true;
+            initializeReliableRetrySchedule();
+            if (nextReliableRetryAt != NO_RETRY_SCHEDULED && now >= nextReliableRetryAt) {
+                for (AprsEvent event : eventRepository.loadDueReliableEvents(now)) {
+                    retryOrFail(event, now);
+                    changed = true;
+                }
+                reloadReliableRetrySchedule();
             }
             if (positionBeaconingEnabled && now >= nextPositionBeaconAt) {
                 nextPositionBeaconAt = now + BEACON_INTERVAL_MS;
@@ -342,6 +354,20 @@ public final class AprsController {
             }
             if (changed) refreshEvents();
         });
+    }
+
+    private void initializeReliableRetrySchedule() {
+        if (nextReliableRetryAt == RETRY_SCHEDULE_UNINITIALIZED) reloadReliableRetrySchedule();
+    }
+
+    private void reloadReliableRetrySchedule() {
+        Long retryAt = eventRepository.loadNextReliableRetryAt();
+        nextReliableRetryAt = retryAt == null ? NO_RETRY_SCHEDULED : retryAt;
+    }
+
+    private void includeInReliableRetrySchedule(Long retryAt) {
+        if (retryAt == null || nextReliableRetryAt == RETRY_SCHEDULE_UNINITIALIZED) return;
+        nextReliableRetryAt = Math.min(nextReliableRetryAt, retryAt);
     }
 
     public void setPositionBeaconingEnabled(boolean enabled, long now) {
@@ -424,6 +450,7 @@ public final class AprsController {
             event.id = eventRepository.insert(event);
             packet.eventId = event.id;
             packetRepository.insert(packet);
+            includeInReliableRetrySchedule(event.nextRetryAtMs);
             refreshEvents();
         });
     }

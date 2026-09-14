@@ -42,6 +42,10 @@ public interface AprsEventDao {
         + "AND next_retry_at_ms IS NOT NULL AND next_retry_at_ms <= :now")
     List<AprsEvent> getDueReliableEvents(int pendingState, long now);
 
+    @Query("SELECT MIN(next_retry_at_ms) FROM aprs_events WHERE delivery_state = :pendingState "
+        + "AND next_retry_at_ms IS NOT NULL")
+    Long getNextReliableRetryAt(int pendingState);
+
     @Query("SELECT * FROM aprs_events WHERE from_callsign = :localCallsign "
         + "AND to_callsign = :remoteCallsign AND message_identifier = :messageIdentifier "
         + "AND delivery_state = :pendingState ORDER BY id DESC LIMIT 1")

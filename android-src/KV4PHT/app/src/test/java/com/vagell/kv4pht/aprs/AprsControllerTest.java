@@ -376,9 +376,42 @@ public class AprsControllerTest {
     @Test public void idleTickDoesNotReloadEventFeed() {
         Fixture f = fixture();
         int loadsAfterStartup = f.events.loadCount;
-        f.controller.tick(1_000L);
+        for (long now = 1_000L; now <= 10_000L; now += 500L) f.controller.tick(now);
+
         assertEquals(loadsAfterStartup, f.events.loadCount);
+        assertEquals(1, f.events.nextRetryLoadCount);
+        assertEquals(0, f.events.dueLoadCount);
+    }
+
+    @Test public void futurePersistedRetryIsQueriedOnlyAtItsDeadline() {
+        Fixture f = fixture();
+        f.events.records.add(pendingEvent("VK3ABC", "7", 10_000L, 1));
+
+        f.controller.tick(1_000L);
+        f.controller.tick(9_500L);
+        assertEquals(1, f.events.nextRetryLoadCount);
+        assertEquals(0, f.events.dueLoadCount);
+
+        f.controller.tick(10_000L);
         assertEquals(1, f.events.dueLoadCount);
+        assertEquals(2, f.events.nextRetryLoadCount);
+    }
+
+    @Test public void outgoingMessageSchedulesRetryWithoutAnotherRoomLookup() {
+        Fixture f = fixture();
+        f.controller.tick(0L);
+        APRSPacket frame = outgoingMessage("VK3ME", "VK3ABC", "hello", "7");
+        f.controller.recordOutgoingMessage("VK3ME", "VK3ABC", "hello", "7",
+            144_390_000L, frame, frame.toAX25Frame());
+        long retryAt = f.events.records.get(0).nextRetryAtMs;
+
+        f.controller.tick(retryAt - 1L);
+        assertEquals(1, f.events.nextRetryLoadCount);
+        assertEquals(0, f.events.dueLoadCount);
+
+        f.controller.tick(retryAt);
+        assertEquals(1, f.events.dueLoadCount);
+        assertEquals(2, f.events.nextRetryLoadCount);
     }
 
     @Test public void finiteHistoryWindowDoesNotRefreshOnIdleTick() {
@@ -607,6 +640,7 @@ public class AprsControllerTest {
         final List<AprsEvent> records = new ArrayList<>();
         int loadCount;
         int dueLoadCount;
+        int nextRetryLoadCount;
 
         @Override public List<AprsEvent> loadEvents(long sinceMs, String localCallsign,
                                                     boolean mineOnly, int limit) {
@@ -636,6 +670,19 @@ public class AprsControllerTest {
                         && event.nextRetryAtMs != null && event.nextRetryAtMs <= now) due.add(event);
             }
             return due;
+        }
+
+        @Override public Long loadNextReliableRetryAt() {
+            nextRetryLoadCount++;
+            Long nextRetryAt = null;
+            for (AprsEvent event : records) {
+                if (event.deliveryState != AprsEvent.DELIVERY_PENDING
+                        || event.nextRetryAtMs == null) continue;
+                if (nextRetryAt == null || event.nextRetryAtMs < nextRetryAt) {
+                    nextRetryAt = event.nextRetryAtMs;
+                }
+            }
+            return nextRetryAt;
         }
 
         @Override public long insert(AprsEvent event) {
