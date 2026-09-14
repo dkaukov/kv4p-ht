@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 8,
-    "identityHash": "9c779e9e45c4ed0b7881213bcc4ce30a",
+    "identityHash": "9baa174f911de5c30b70d2a648ec2f56",
     "entities": [
       {
         "tableName": "app_settings",
@@ -337,24 +337,24 @@
         },
         "indices": [
           {
-            "name": "index_aprs_events_last_seen_ms",
+            "name": "index_aprs_events_first_seen_ms",
             "unique": false,
             "columnNames": [
-              "last_seen_ms"
+              "first_seen_ms"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_aprs_events_last_seen_ms` ON `${TABLE_NAME}` (`last_seen_ms`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aprs_events_first_seen_ms` ON `${TABLE_NAME}` (`first_seen_ms`)"
           },
           {
-            "name": "index_aprs_events_type_to_callsign_last_seen_ms",
+            "name": "index_aprs_events_type_to_callsign_first_seen_ms",
             "unique": false,
             "columnNames": [
               "type",
               "to_callsign",
-              "last_seen_ms"
+              "first_seen_ms"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_aprs_events_type_to_callsign_last_seen_ms` ON `${TABLE_NAME}` (`type`, `to_callsign`, `last_seen_ms`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aprs_events_type_to_callsign_first_seen_ms` ON `${TABLE_NAME}` (`type`, `to_callsign`, `first_seen_ms`)"
           },
           {
             "name": "index_aprs_events_dedup_key_last_seen_ms",
@@ -392,7 +392,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9c779e9e45c4ed0b7881213bcc4ce30a')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9baa174f911de5c30b70d2a648ec2f56')"
     ]
   }
 }

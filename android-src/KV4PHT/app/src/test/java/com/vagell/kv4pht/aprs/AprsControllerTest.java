@@ -405,7 +405,7 @@ public class AprsControllerTest {
         assertEquals("event 5000", visible.get(visible.size() - 1).comment);
     }
 
-    @Test public void everyHistoryWindowLimitsEventsByLastSeenTime() {
+    @Test public void everyHistoryWindowLimitsEventsByFirstSeenTime() {
         Fixture f = fixture();
         long now = System.currentTimeMillis();
         long day = 24 * 60 * 60_000L;
@@ -425,6 +425,37 @@ public class AprsControllerTest {
         assertEquals(4, f.controller.getEvents().getValue().size());
         f.controller.setHistoryWindow(AprsController.HISTORY_ALL);
         assertEquals(5, f.controller.getEvents().getValue().size());
+    }
+
+    @Test public void recentlyAggregatedOldEventRemainsOutsideHistoryWindow() {
+        Fixture f = fixture();
+        long now = System.currentTimeMillis();
+        AprsEvent old = eventAt("old", now - 2 * 24 * 60 * 60_000L);
+        old.lastSeenMs = now;
+        f.events.records.add(old);
+
+        f.controller.setHistoryWindow(AprsController.HISTORY_ONE_DAY);
+
+        assertTrue(f.controller.getEvents().getValue().isEmpty());
+    }
+
+    @Test public void packetAggregationDoesNotReorderEventHistory() {
+        Fixture f = fixture();
+        AprsEvent older = eventAt("older", 1_000L);
+        older.id = 1L;
+        AprsEvent newer = eventAt("newer", 2_000L);
+        newer.id = 2L;
+        f.events.records.add(older);
+        f.events.records.add(newer);
+        APRSPacket retry = outgoingMessage("VK3ME", "VK3ABC", "hello", "7");
+
+        f.controller.recordTransmission(older.id, retry, 144_390_000L, retry.toAX25Frame());
+
+        List<AprsEvent> visible = f.controller.getEvents().getValue();
+        assertEquals("older", visible.get(0).comment);
+        assertEquals("newer", visible.get(1).comment);
+        assertEquals(1_000L, older.firstSeenMs);
+        assertTrue(older.lastSeenMs > newer.lastSeenMs);
     }
 
     @Test public void mineFilterKeepsBroadcastsMessagesToMeAndNonMessageEvents() {
@@ -515,17 +546,17 @@ public class AprsControllerTest {
         return event;
     }
 
-    private static AprsEvent eventAt(String comment, long lastSeenMs) {
+    private static AprsEvent eventAt(String comment, long timestampMs) {
         AprsEvent event = new AprsEvent();
         event.type = AprsEvent.POSITION_TYPE;
-        event.firstSeenMs = lastSeenMs;
-        event.lastSeenMs = lastSeenMs;
+        event.firstSeenMs = timestampMs;
+        event.lastSeenMs = timestampMs;
         event.comment = comment;
         return event;
     }
 
-    private static AprsEvent messageEvent(String destination, String body, long lastSeenMs) {
-        AprsEvent event = eventAt(null, lastSeenMs);
+    private static AprsEvent messageEvent(String destination, String body, long timestampMs) {
+        AprsEvent event = eventAt(null, timestampMs);
         event.type = AprsEvent.MESSAGE_TYPE;
         event.toCallsign = destination;
         event.body = body;
@@ -578,7 +609,7 @@ public class AprsControllerTest {
             loadCount++;
             List<AprsEvent> visible = new ArrayList<>();
             for (AprsEvent event : records) {
-                if (event.lastSeenMs < sinceMs) continue;
+                if (event.firstSeenMs < sinceMs) continue;
                 String destination = event.toCallsign;
                 boolean broadcast = destination != null && (destination.startsWith("BLN")
                     || destination.equals("ALL") || destination.equals("QST")
@@ -586,7 +617,7 @@ public class AprsControllerTest {
                 if (!mineOnly || event.type != AprsEvent.MESSAGE_TYPE
                         || localCallsign.equals(destination) || broadcast) visible.add(event);
             }
-            visible.sort(Comparator.comparingLong((AprsEvent event) -> event.lastSeenMs)
+            visible.sort(Comparator.comparingLong((AprsEvent event) -> event.firstSeenMs)
                 .thenComparingLong(event -> event.id));
             int firstVisible = Math.max(0, visible.size() - limit);
             return new ArrayList<>(visible.subList(firstVisible, visible.size()));

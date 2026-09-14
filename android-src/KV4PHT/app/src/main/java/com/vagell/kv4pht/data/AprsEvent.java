@@ -27,8 +27,8 @@ import androidx.room.PrimaryKey;
 @Entity(
     tableName = "aprs_events",
     indices = {
-        @Index("last_seen_ms"),
-        @Index(value = {"type", "to_callsign", "last_seen_ms"}),
+        @Index("first_seen_ms"),
+        @Index(value = {"type", "to_callsign", "first_seen_ms"}),
         @Index(value = {"dedup_key", "last_seen_ms"}),
         @Index(value = {"delivery_state", "next_retry_at_ms"}),
         @Index(value = {"from_callsign", "to_callsign", "message_identifier"})
@@ -52,8 +52,10 @@ public class AprsEvent {
 
     @ColumnInfo(name = "type", defaultValue = "0")
     public int type;
+    /** Stable event time used for history filtering, ordering, and display. */
     @ColumnInfo(name = "first_seen_ms")
     public long firstSeenMs;
+    /** Latest associated packet time, used only for aggregation and duplicate detection. */
     @ColumnInfo(name = "last_seen_ms")
     public long lastSeenMs;
     @ColumnInfo(name = "packet_count", defaultValue = "0")

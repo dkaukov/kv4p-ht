@@ -54,11 +54,11 @@ public class MigrationFrom7To8 extends Migration {
             + "transmit_attempts INTEGER NOT NULL DEFAULT 0, next_retry_at_ms INTEGER)");
         database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_dedup_key_last_seen_ms "
             + "ON aprs_events (dedup_key, last_seen_ms)");
-        database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_last_seen_ms "
-            + "ON aprs_events (last_seen_ms)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_first_seen_ms "
+            + "ON aprs_events (first_seen_ms)");
         database.execSQL("CREATE INDEX IF NOT EXISTS "
-            + "index_aprs_events_type_to_callsign_last_seen_ms "
-            + "ON aprs_events (type, to_callsign, last_seen_ms)");
+            + "index_aprs_events_type_to_callsign_first_seen_ms "
+            + "ON aprs_events (type, to_callsign, first_seen_ms)");
         database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_delivery_state_next_retry_at_ms "
             + "ON aprs_events (delivery_state, next_retry_at_ms)");
         database.execSQL("CREATE INDEX IF NOT EXISTS "

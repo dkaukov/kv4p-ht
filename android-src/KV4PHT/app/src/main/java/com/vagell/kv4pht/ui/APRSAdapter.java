@@ -85,7 +85,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
 
         // Some default values any message type can have
         holder.setFromCallsign(aprsEvent.fromCallsign);
-        holder.setTimestamp(aprsEvent.lastSeenMs);
+        holder.setTimestamp(aprsEvent.firstSeenMs);
         holder.setComment(aprsEvent.comment);
         holder.setPositionLat(aprsEvent.positionLat);
         holder.setPositionLong(aprsEvent.positionLong);
