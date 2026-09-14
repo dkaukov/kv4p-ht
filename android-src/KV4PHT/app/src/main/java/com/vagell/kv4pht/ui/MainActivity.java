@@ -98,6 +98,7 @@ import static com.google.android.material.snackbar.Snackbar.LENGTH_LONG;
 import static com.vagell.kv4pht.radio.RadioAudioService.INTENT_OPEN_CHAT;
 
 public class MainActivity extends AppCompatActivity {
+    private static final int APRS_AUTO_SCROLL_DISTANCE = 2;
     private static final String EXTRA_MEMORY_ID = "memoryId";
 
     private final Handler pttButtonDebounceHandler = new Handler(Looper.getMainLooper());
@@ -496,9 +497,10 @@ public class MainActivity extends AppCompatActivity {
             radioAudioService.setCallbacks(callbacks);
             if (!aprsMessagesObserved) {
                 radioAudioService.getAprsEvents().observe(MainActivity.this, aprsEvents -> {
+                    boolean autoScroll = shouldAutoScrollAprs();
                     aprsAdapter.setAprsEvents(aprsEvents);
                     aprsAdapter.notifyDataSetChanged();
-                    if (aprsEvents != null && !aprsEvents.isEmpty()) {
+                    if (autoScroll && aprsEvents != null && !aprsEvents.isEmpty()) {
                         aprsRecyclerView.scrollToPosition(aprsEvents.size() - 1);
                     }
                 });
@@ -518,6 +520,20 @@ public class MainActivity extends AppCompatActivity {
             // TODO if this is unexpected we should probably try to restart the service.
         }
     };
+
+    private boolean shouldAutoScrollAprs() {
+        int itemCount = aprsAdapter.getItemCount();
+        if (itemCount == 0) return true;
+        RecyclerView.LayoutManager layoutManager = aprsRecyclerView.getLayoutManager();
+        if (!(layoutManager instanceof LinearLayoutManager)) return false;
+        int lastVisible = ((LinearLayoutManager) layoutManager).findLastVisibleItemPosition();
+        return shouldAutoScrollAprs(itemCount, lastVisible);
+    }
+
+    static boolean shouldAutoScrollAprs(int itemCount, int lastVisibleItemPosition) {
+        return itemCount == 0 || lastVisibleItemPosition != RecyclerView.NO_POSITION
+            && lastVisibleItemPosition >= itemCount - 1 - APRS_AUTO_SCROLL_DISTANCE;
+    }
 
     /**
      * Returns the set of runtime permissions required before starting
