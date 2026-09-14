@@ -80,6 +80,18 @@ public class AprsControllerTest {
         assertEquals(2, f.callbacks.acknowledgementCount);
     }
 
+    @Test public void numberedMessageCopiesUseLongerDuplicateWindow() {
+        Fixture f = fixture();
+        APRSPacket frame = directMessage("VK3ABC", "VK3ME", "hello", "A7");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+        f.events.records.get(0).lastSeenMs -= 60_000L;
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(1, f.events.records.size());
+        assertEquals(2, f.events.records.get(0).packetCount);
+    }
+
     @Test public void copiesOfPositionViaDifferentPathsCollapseIntoOneEvent() throws Exception {
         Fixture f = fixture();
         APRSPacket direct = Parser.parse("VK3ABC>APRS,WIDE1-1:!3751.65S/14458.20E-Test");
@@ -92,6 +104,18 @@ public class AprsControllerTest {
         assertEquals(1, f.events.records.size());
         assertEquals(AprsEvent.POSITION_TYPE, f.events.records.get(0).type);
         assertEquals(2, f.events.records.get(0).packetCount);
+    }
+
+    @Test public void unchangedPositionAfterThirtySecondsCreatesNewEvent() throws Exception {
+        Fixture f = fixture();
+        APRSPacket frame = Parser.parse("VK3ABC>APRS:!3751.65S/14458.20E-Test");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+        f.events.records.get(0).lastSeenMs -= 31_000L;
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(2, f.events.records.size());
+        assertEquals(2, f.packets.records.size());
     }
 
     @Test public void weatherAndObjectEachCreateEvents() throws Exception {
@@ -166,6 +190,23 @@ public class AprsControllerTest {
         assertEquals(AprsSource.TX_RF, packet.source);
     }
 
+    @Test public void digipeatedEchoAttachesToOutgoingChatEvent() {
+        Fixture f = fixture();
+        APRSPacket transmitted = outgoingMessage("VK3ME", "VK3ABC", "hello", "7");
+        APRSPacket echoed = new APRSPacket("VK3ME", transmitted.getDestinationCall(),
+            Collections.singletonList(new Digipeater("VK3DIG*")),
+            MessagePacket.createMessagePayload("VK3ABC", "hello", "7"));
+
+        f.controller.recordOutgoingMessage("VK3ME", "VK3ABC", "hello", "7",
+            144_390_000L, transmitted, transmitted.toAX25Frame());
+        f.controller.handle(echoed, AprsSource.RX_RF, 144_390_000L, echoed.toAX25Frame());
+
+        assertEquals(1, f.events.records.size());
+        assertEquals(2, f.events.records.get(0).packetCount);
+        assertEquals(2, f.packets.records.size());
+        assertEquals(f.packets.records.get(0).eventId, f.packets.records.get(1).eventId);
+    }
+
     @Test public void outgoingPositionCreatesEventAndPacket() {
         Fixture f = fixture();
         APRSPacket frame = new APRSPacket("VK3ME",
@@ -178,6 +219,24 @@ public class AprsControllerTest {
         assertEquals(1, f.events.records.size());
         assertEquals(AprsEvent.POSITION_TYPE, f.events.records.get(0).type);
         assertEquals(1, f.packets.records.size());
+    }
+
+    @Test public void digipeatedEchoAttachesToOutgoingPositionEvent() throws Exception {
+        Fixture f = fixture();
+        APRSPacket transmitted = new APRSPacket("VK3ME",
+            Collections.singletonList(new Digipeater("WIDE1-1")),
+            "!3751.65S/14458.20E-Test".getBytes(StandardCharsets.US_ASCII));
+        APRSPacket echoed = Parser.parse("VK3ME>" + transmitted.getDestinationCall()
+            + ",VK3DIG*:!3751.65S/14458.20E-Test");
+
+        f.controller.recordPositionBeacon("VK3ME", -37.8608, 144.9700,
+            144_390_000L, transmitted, transmitted.toAX25Frame());
+        f.controller.handle(echoed, AprsSource.RX_RF, 144_390_000L, echoed.toAX25Frame());
+
+        assertEquals(1, f.events.records.size());
+        assertEquals(2, f.events.records.get(0).packetCount);
+        assertEquals(2, f.packets.records.size());
+        assertEquals(f.packets.records.get(0).eventId, f.packets.records.get(1).eventId);
     }
 
     @Test public void acknowledgementLinksPacketAndUpdatesOutgoingEvent() {

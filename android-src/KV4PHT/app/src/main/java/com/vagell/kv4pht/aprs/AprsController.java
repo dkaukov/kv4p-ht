@@ -67,7 +67,8 @@ public final class AprsController {
     private static final long FINAL_ACK_GRACE_MS = 30_000L;
     private static final long BEACON_INTERVAL_MS = 5 * 60_000L;
     private static final int MAX_VISIBLE_EVENTS = 5_000;
-    private static final long DUPLICATE_WINDOW_MS = 30 * 60_000L;
+    private static final long EVENT_DUPLICATE_WINDOW_MS = 30_000L;
+    private static final long NUMBERED_MESSAGE_DUPLICATE_WINDOW_MS = 30 * 60_000L;
     private static final long DIGIPEAT_DEDUP_MS = 28_000L;
 
     /** Persistence boundary for immutable packet history. */
@@ -263,7 +264,7 @@ public final class AprsController {
 
     private AprsEvent persistEvent(AprsPacket packet, AprsEvent candidate) {
         AprsEvent event = eventRepository.findRecentByDedupKey(candidate.dedupKey,
-            candidate.lastSeenMs - DUPLICATE_WINDOW_MS);
+            candidate.lastSeenMs - duplicateWindowMs(candidate));
         boolean created = event == null;
         if (created) {
             candidate.packetCount = 1;
@@ -417,6 +418,7 @@ public final class AprsController {
 
     private void persistOutgoingEvent(AprsEvent event, APRSPacket frame, Long frequencyHz,
                                       byte[] rawAx25) {
+        event.dedupKey = logicalPacketKey(frame);
         AprsPacket packet = physicalPacket(frame, AprsSource.TX_RF, frequencyHz, rawAx25);
         executor.execute(() -> {
             event.id = eventRepository.insert(event);
@@ -464,7 +466,7 @@ public final class AprsController {
         applyComment(event, packet, info, position, object, weather);
         applyPayload(event, packet, info, object, weather);
         if (packet.hasFault() || event.type == AprsEvent.UNKNOWN_TYPE) return null;
-        event.dedupKey = dedupKey(event);
+        event.dedupKey = logicalPacketKey(packet);
         return ParsedEvent.event(event);
     }
 
@@ -533,33 +535,15 @@ public final class AprsController {
         return direction == null ? "" : Utilities.degressToCardinal(direction);
     }
 
-    private String dedupKey(AprsEvent event) {
-        StringBuilder key = new StringBuilder();
-        appendKey(key, String.valueOf(event.type));
-        appendKey(key, event.fromCallsign);
-        appendKey(key, event.toCallsign);
-        appendKey(key, event.messageIdentifier);
-        appendKey(key, event.body);
-        appendKey(key, String.valueOf(event.positionLat));
-        appendKey(key, String.valueOf(event.positionLong));
-        appendKey(key, event.comment);
-        appendKey(key, event.objectName);
-        appendKey(key, String.valueOf(event.temperature));
-        appendKey(key, String.valueOf(event.humidity));
-        appendKey(key, String.valueOf(event.pressure));
-        appendKey(key, String.valueOf(event.rain));
-        appendKey(key, String.valueOf(event.snow));
-        appendKey(key, String.valueOf(event.windForce));
-        appendKey(key, event.windDirection);
-        return key.toString();
+    private long duplicateWindowMs(AprsEvent event) {
+        return event.type == AprsEvent.MESSAGE_TYPE
+                && event.messageIdentifier != null && !event.messageIdentifier.trim().isEmpty()
+            ? NUMBERED_MESSAGE_DUPLICATE_WINDOW_MS : EVENT_DUPLICATE_WINDOW_MS;
     }
 
-    private void appendKey(StringBuilder destination, String value) {
-        if (value == null) {
-            destination.append("-:");
-        } else {
-            destination.append(value.length()).append(':').append(value);
-        }
+    private String logicalPacketKey(APRSPacket packet) {
+        return packet.getSourceCall() + "|" + packet.getDestinationCall() + "|"
+            + Base64.getEncoder().encodeToString(packet.getPayload().getRawBytes());
     }
 
     private void refreshEvents() {
