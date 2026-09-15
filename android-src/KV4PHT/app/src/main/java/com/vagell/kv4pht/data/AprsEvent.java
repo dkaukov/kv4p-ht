@@ -60,6 +60,9 @@ public class AprsEvent {
     public long lastSeenMs;
     @ColumnInfo(name = "packet_count", defaultValue = "0")
     public int packetCount;
+    /** Whether this station retransmitted at least one packet associated with this event. */
+    @ColumnInfo(name = "digipeated", defaultValue = "0")
+    public boolean digipeated;
     /** Stable controller-generated key used to collapse recent duplicate observations. */
     @ColumnInfo(name = "dedup_key")
     public String dedupKey;

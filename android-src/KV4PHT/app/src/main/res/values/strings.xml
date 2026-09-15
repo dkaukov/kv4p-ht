@@ -117,6 +117,7 @@
     <string name="aprs_delivery_delivered">Message acknowledged</string>
     <string name="aprs_delivery_rejected">Message rejected</string>
     <string name="aprs_delivery_failed">Message delivery failed</string>
+    <string name="aprs_digipeated">Digipeated</string>
     <string name="all">All</string>
     <string name="mine">Mine</string>
     <string name="aprs_icon_phone">Phone</string>

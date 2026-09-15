@@ -240,7 +240,7 @@ public final class AprsController {
     private void persistIncoming(AprsPacket packet, ParsedEvent parsed, Transmission digipeated) {
         AprsEvent event = persistPacket(packet, parsed);
         if (digipeated != null) {
-            recordTransmissionNow(event == null ? null : event.id, digipeated);
+            recordTransmissionNow(event == null ? null : event.id, digipeated, true);
         }
         refreshEvents();
     }
@@ -324,6 +324,11 @@ public final class AprsController {
     }
 
     private void recordTransmissionNow(Long eventId, Transmission transmission) {
+        recordTransmissionNow(eventId, transmission, false);
+    }
+
+    private void recordTransmissionNow(Long eventId, Transmission transmission,
+                                       boolean digipeated) {
         AprsPacket packet = physicalPacket(transmission.packet, AprsSource.TX_RF,
             transmission.frequencyHz, transmission.rawAx25);
         if (eventId == null) {
@@ -334,6 +339,7 @@ public final class AprsController {
         if (event == null) {
             packetRepository.insert(packet);
         } else {
+            event.digipeated |= digipeated;
             associatePacket(event, packet);
         }
     }
@@ -623,8 +629,9 @@ public final class AprsController {
 
     private Transmission maybeDigipeat(APRSPacket packet) {
         String localCallsign = callbacks.getCallsign();
-        if (!digipeatingEnabled || localCallsign == null || localCallsign.trim().isEmpty()) return null;
-        String key = digipeatKey(packet);
+        if (!digipeatingEnabled || localCallsign == null || localCallsign.trim().isEmpty()
+                || packet == null || packet.getPayload() == null || packet.hasFault()) return null;
+        String key = logicalPacketKey(packet);
         long now = System.currentTimeMillis();
         pruneDigipeatCache(digipeatInputCache, now);
         if (digipeatInputCache.containsKey(key)) return null;
@@ -635,17 +642,15 @@ public final class AprsController {
         Digipeater next = digis.get(index);
         String baseCall = APRSPacket.getBaseCall(next.getCallsign());
         int ssid = parseSsid(next);
-        boolean ours = baseCall.equalsIgnoreCase(APRSPacket.getBaseCall(localCallsign));
-        boolean wide1 = baseCall.equalsIgnoreCase("WIDE1") && ssid >= 1 && ssid <= 2;
+        boolean ours = normalizeAx25Address(next.toString())
+            .equals(normalizeAx25Address(localCallsign));
+        boolean wide1 = baseCall.equalsIgnoreCase("WIDE1") && ssid == 1;
         if (!ours && !wide1) return null;
         List<Digipeater> replacement = new ArrayList<>(digis);
         if (ours) {
-            replacement.set(index, usedDigipeater(next.getCallsign()));
-        } else if (ssid == 1) {
-            replacement.set(index, usedDigipeater(localCallsign));
+            replacement.set(index, usedDigipeater(next.toString()));
         } else {
-            replacement.set(index, new Digipeater(baseCall + "-1"));
-            replacement.add(index, usedDigipeater(localCallsign));
+            replacement.set(index, usedDigipeater(localCallsign));
         }
         APRSPacket retransmit = new APRSPacket(packet.getSourceCall(), packet.getDestinationCall(),
             replacement, packet.getPayload().getRawBytes());
@@ -653,7 +658,7 @@ public final class AprsController {
         Transmission transmission = callbacks.transmitDigipeatedPacket(retransmit);
         if (transmission != null) {
             digipeatInputCache.put(key, now);
-            digipeatOutputCache.put(digipeatKey(retransmit), now);
+            digipeatOutputCache.put(digipeatOutputKey(retransmit), now);
         }
         return transmission;
     }
@@ -661,7 +666,7 @@ public final class AprsController {
     private boolean isRecentlyDigipeated(APRSPacket packet) {
         long now = System.currentTimeMillis();
         pruneDigipeatCache(digipeatOutputCache, now);
-        Long previous = digipeatOutputCache.get(digipeatKey(packet));
+        Long previous = digipeatOutputCache.get(digipeatOutputKey(packet));
         return previous != null && now - previous < DIGIPEAT_DEDUP_MS;
     }
 
@@ -669,7 +674,7 @@ public final class AprsController {
         cache.entrySet().removeIf(entry -> now - entry.getValue() >= DIGIPEAT_DEDUP_MS);
     }
 
-    private String digipeatKey(APRSPacket packet) {
+    private String digipeatOutputKey(APRSPacket packet) {
         String path = packet.getDigipeaters() == null ? "" : packet.getDigipeaters().stream()
             .map(Digipeater::toString).collect(Collectors.joining(","));
         return packet.getSourceCall() + "|" + packet.getDestinationCall() + "|" + path + "|"
@@ -688,6 +693,17 @@ public final class AprsController {
             return Integer.parseInt(APRSPacket.getSsid(digipeater.toString()));
         } catch (NumberFormatException ignored) {
             return -1;
+        }
+    }
+
+    private String normalizeAx25Address(String address) {
+        String normalized = normalizeCallsign(address);
+        String baseCall = APRSPacket.getBaseCall(normalized);
+        try {
+            int ssid = Integer.parseInt(APRSPacket.getSsid(normalized));
+            return ssid == 0 ? baseCall : baseCall + "-" + ssid;
+        } catch (NumberFormatException ignored) {
+            return normalized;
         }
     }
 

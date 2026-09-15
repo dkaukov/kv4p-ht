@@ -541,6 +541,88 @@ public class AprsControllerTest {
         assertEquals(3, f.packets.records.size());
         assertEquals(1, f.events.records.size());
         assertEquals(3, f.events.records.get(0).packetCount);
+        assertTrue(f.events.records.get(0).digipeated);
+    }
+
+    @Test public void fillInDigipeaterReplacesWideOneOneWithItsCallsign() {
+        Fixture f = fixture();
+        f.callbacks.callsign = "VK3ME-9";
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket frame = packetWithPath("WIDE1-1");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(1, f.callbacks.digipeatCount);
+        assertEquals("VK3ME-9*", f.callbacks.lastDigipeatedPacket.getDigipeaters().get(0).toString());
+    }
+
+    @Test public void fillInDigipeaterRejectsWideOneTwo() {
+        Fixture f = fixture();
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket frame = packetWithPath("WIDE1-2");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(0, f.callbacks.digipeatCount);
+    }
+
+    @Test public void explicitDigipeaterAddressRequiresMatchingSsid() {
+        Fixture f = fixture();
+        f.callbacks.callsign = "VK3ME-9";
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket wrongSsid = packetWithPath("VK3ME-1");
+        APRSPacket exactAddress = packetWithPath("VK3ME-9");
+
+        f.controller.handle(wrongSsid, AprsSource.RX_RF, 144_390_000L,
+            wrongSsid.toAX25Frame());
+        f.controller.handle(exactAddress, AprsSource.RX_RF, 144_390_000L,
+            exactAddress.toAX25Frame());
+
+        assertEquals(1, f.callbacks.digipeatCount);
+        assertEquals("VK3ME-9*", f.callbacks.lastDigipeatedPacket.getDigipeaters().get(0).toString());
+    }
+
+    @Test public void duplicateSuppressionIgnoresChangingDigipeaterPath() {
+        Fixture f = fixture();
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket direct = packetWithPath("WIDE1-1");
+        Digipeater prior = new Digipeater("VK3D1");
+        prior.setUsed(true);
+        APRSPacket relayed = new APRSPacket("VK3ABC", "APRS",
+            List.of(prior, new Digipeater("WIDE1-1")),
+            ">test".getBytes(StandardCharsets.US_ASCII));
+
+        f.controller.handle(direct, AprsSource.RX_RF, 144_390_000L, direct.toAX25Frame());
+        f.controller.handle(relayed, AprsSource.RX_RF, 144_390_000L, relayed.toAX25Frame());
+
+        assertEquals(1, f.callbacks.digipeatCount);
+        assertEquals(3, f.packets.records.size());
+    }
+
+    @Test public void malformedPacketIsNeverDigipeated() throws Exception {
+        Fixture f = fixture();
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket malformed = Parser.parse("VK3ABC>APRS,WIDE1-1:Ainvalid");
+
+        f.controller.handle(malformed, AprsSource.RX_RF, 144_390_000L,
+            malformed.toAX25Frame());
+
+        assertTrue(malformed.hasFault());
+        assertEquals(0, f.callbacks.digipeatCount);
+        assertEquals(1, f.packets.records.size());
+    }
+
+    @Test public void rejectedDigipeatTransmissionDoesNotSetIndicator() {
+        Fixture f = fixture();
+        f.callbacks.digipeatSucceeds = false;
+        f.controller.setDigipeatingEnabled(true);
+        APRSPacket frame = packetWithPath("WIDE1-1");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(1, f.callbacks.digipeatCount);
+        assertFalse(f.events.records.get(0).digipeated);
+        assertEquals(1, f.packets.records.size());
     }
 
     @Test public void stationAddressRulesRemainCompatible() {
@@ -739,15 +821,18 @@ public class AprsControllerTest {
     }
 
     private static final class FakeCallbacks implements AprsController.Callbacks {
+        String callsign = "VK3ME";
         int retryCount;
         int beaconCount;
         int digipeatCount;
         int notificationCount;
         int acknowledgementCount;
         boolean retrySucceeds = true;
+        boolean digipeatSucceeds = true;
+        APRSPacket lastDigipeatedPacket;
 
         @Override public String getCallsign() {
-            return "VK3ME";
+            return callsign;
         }
 
         @Override public void showNotification(String title, String message) {
@@ -775,6 +860,8 @@ public class AprsControllerTest {
 
         @Override public AprsController.Transmission transmitDigipeatedPacket(APRSPacket packet) {
             digipeatCount++;
+            if (!digipeatSucceeds) return null;
+            lastDigipeatedPacket = packet;
             return new AprsController.Transmission(packet, 144_390_000L, packet.toAX25Frame());
         }
     }

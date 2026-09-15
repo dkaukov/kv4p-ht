@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 8,
-    "identityHash": "9baa174f911de5c30b70d2a648ec2f56",
+    "identityHash": "7f8326af4f75196ff11ba7787a4b1f81",
     "entities": [
       {
         "tableName": "app_settings",
@@ -182,7 +182,7 @@
       },
       {
         "tableName": "aprs_events",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` INTEGER NOT NULL DEFAULT 0, `first_seen_ms` INTEGER NOT NULL, `last_seen_ms` INTEGER NOT NULL, `packet_count` INTEGER NOT NULL DEFAULT 0, `dedup_key` TEXT, `from_callsign` TEXT, `to_callsign` TEXT, `message_identifier` TEXT, `body` TEXT, `position_lat` REAL NOT NULL, `position_long` REAL NOT NULL, `comment` TEXT, `object_name` TEXT, `temperature` REAL NOT NULL, `humidity` REAL NOT NULL, `pressure` REAL NOT NULL, `rain` REAL NOT NULL, `snow` REAL NOT NULL, `wind_force` INTEGER NOT NULL, `wind_direction` TEXT, `relay_callsign` TEXT, `delivery_state` INTEGER NOT NULL DEFAULT 0, `transmit_attempts` INTEGER NOT NULL DEFAULT 0, `next_retry_at_ms` INTEGER)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` INTEGER NOT NULL DEFAULT 0, `first_seen_ms` INTEGER NOT NULL, `last_seen_ms` INTEGER NOT NULL, `packet_count` INTEGER NOT NULL DEFAULT 0, `digipeated` INTEGER NOT NULL DEFAULT 0, `dedup_key` TEXT, `from_callsign` TEXT, `to_callsign` TEXT, `message_identifier` TEXT, `body` TEXT, `position_lat` REAL NOT NULL, `position_long` REAL NOT NULL, `comment` TEXT, `object_name` TEXT, `temperature` REAL NOT NULL, `humidity` REAL NOT NULL, `pressure` REAL NOT NULL, `rain` REAL NOT NULL, `snow` REAL NOT NULL, `wind_force` INTEGER NOT NULL, `wind_direction` TEXT, `relay_callsign` TEXT, `delivery_state` INTEGER NOT NULL DEFAULT 0, `transmit_attempts` INTEGER NOT NULL DEFAULT 0, `next_retry_at_ms` INTEGER)",
         "fields": [
           {
             "fieldPath": "id",
@@ -212,6 +212,13 @@
           {
             "fieldPath": "packetCount",
             "columnName": "packet_count",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "digipeated",
+            "columnName": "digipeated",
             "affinity": "INTEGER",
             "notNull": true,
             "defaultValue": "0"
@@ -392,7 +399,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9baa174f911de5c30b70d2a648ec2f56')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7f8326af4f75196ff11ba7787a4b1f81')"
     ]
   }
 }

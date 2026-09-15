@@ -123,6 +123,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         holder.setComment(aprsEvent.comment);
         holder.setPositionLat(aprsEvent.positionLat);
         holder.setPositionLong(aprsEvent.positionLong);
+        holder.setDigipeated(aprsEvent.digipeated);
 
         // Specialized values
         switch (aprsEvent.type) {
@@ -184,6 +185,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         TextView textViewObjName;
         TextView textViewRelayCallsign;
         TextView textViewRelayViaLabel;
+        TextView textViewDigipeated;
 
         public APRSViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -207,6 +209,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             textViewObjName = itemView.findViewById(R.id.objName);
             textViewRelayCallsign = itemView.findViewById(R.id.relayCallsign);
             textViewRelayViaLabel = itemView.findViewById(R.id.relayViaLabel);
+            textViewDigipeated = itemView.findViewById(R.id.digipeatedIndicator);
         }
 
         public void setFromCallsign(String fromCallsign) {
@@ -339,6 +342,12 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
 
         public void setRelayCallsign(String relayCallsign) {
             // Relay callsigns are intentionally not displayed: they make the status line hard to read.
+        }
+
+        public void setDigipeated(boolean digipeated) {
+            if (textViewDigipeated != null) {
+                textViewDigipeated.setVisibility(digipeated ? View.VISIBLE : View.GONE);
+            }
         }
     }
 }
