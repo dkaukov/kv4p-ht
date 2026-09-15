@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <DRA818.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include "globals.h"
 #include "debug.h"
@@ -28,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "state.h"
 #include "rxAudio.h"
 #include "txAudio.h"
+#include "ax25TxScheduler.h"
 #include "buttons.h"
 #include "utils.h"
 #include "board.h"
@@ -64,8 +66,11 @@ Kv4pBleKissStream bleKissStream(bleKissConfig());
 bool bluetoothStarted = false;
 bool bluetoothProtocolConnected = false;
 bool bleKissProtocolConnected = false;
-KissParser bluetoothParser(protocolBtSession, &handleCommands, &handleAx25Data);
-KissParser bleKissParser(protocolBleSession, &handleCommands, &handleAx25Data);
+KissParser bluetoothParser(protocolBtSession, &handleCommands, &handleAx25Data,
+  &handleKissParameter);
+KissParser bleKissParser(protocolBleSession, &handleCommands, &handleAx25Data,
+  &handleKissParameter);
+Ax25TxScheduler ax25TxScheduler;
 
 float moduleMinRadioFreq() {
   return hw.rfModuleType == RF_SA818_UHF ? 400.0f : 134.0f;
@@ -470,21 +475,66 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
         esp_task_wdt_reset();
       }
       break;
+    case COMMAND_HOST_TX_AX25:
+      if (param_len > sizeof(Ax25TxOverride) && txAllowedByHost()) {
+        Ax25TxOverride txOverride;
+        memcpy(&txOverride, params, sizeof(txOverride));
+        size_t ax25Len = param_len - sizeof(txOverride);
+        if (isModuleRadioFreq(txOverride.freqTx) && ax25Len <= PROTO_MTU
+            && !ax25TxScheduler.enqueue(params + sizeof(txOverride), ax25Len, &txOverride)) {
+          _LOGW("AX.25 TX queue full; dropped frequency-override job");
+        }
+      }
+      break;
   }
 }
 
 void handleAx25Data(uint8_t *ax25, size_t ax25_len) {
   if (ax25_len > 0 && ax25_len <= PROTO_MTU && txAllowedByHost()) {
-    setMode(MODE_TX);
-    latestRssi = (uint8_t)TX_AUDIO_LEVEL_FULL_SCALE_RSSI;
-    txAudioLevel = TX_AUDIO_LEVEL_FULL_SCALE_RSSI;
-    sendCurrentDeviceState();
-    pulseAprsTxLED();
-    processTxAx25(ax25, ax25_len);
-    setMode(rxIdleMode());
-    sendCurrentDeviceState();
+    if (!ax25TxScheduler.enqueue(ax25, ax25_len)) {
+      _LOGW("AX.25 TX queue full; dropped KISS DATA frame");
+    }
+  }
+}
+
+void handleKissParameter(uint8_t command, uint8_t value) {
+  if (command == KISS_CMD_TXDELAY) ax25TxScheduler.setTxDelay(value);
+  else if (command == KISS_CMD_PERSIST) ax25TxScheduler.setPersist(value);
+  else if (command == KISS_CMD_SLOTTIME) ax25TxScheduler.setSlotTime(value);
+}
+
+void applyAx25TxOverride(const Ax25TxOverride &txOverride) {
+  drainRadioSerial();
+  while (!sa818.group(txOverride.bw, txOverride.freqTx, desiredState.freq_rx, txOverride.ctcssTx, 0, 0)) {
+    lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
     esp_task_wdt_reset();
   }
+}
+
+void ax25TxLoop() {
+  // Qualified AFSK DCD is independent of SA818 squelch and audio UI state.
+  bool carrierClear = !afskDemod.carrierDetected();
+  bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
+  bool channelClear = receiveIdle && carrierClear && txAllowedByHost();
+  if (!ax25TxScheduler.ready(millis(), channelClear, (uint8_t)esp_random())) {
+    return;
+  }
+  const Ax25TxJob *job = ax25TxScheduler.head();
+  if (job == nullptr) return;
+  if (job->hasTxOverride) applyAx25TxOverride(job->txOverride);
+
+  setMode(MODE_TX);
+  latestRssi = (uint8_t)TX_AUDIO_LEVEL_FULL_SCALE_RSSI;
+  txAudioLevel = TX_AUDIO_LEVEL_FULL_SCALE_RSSI;
+  sendCurrentDeviceState();
+  pulseAprsTxLED();
+  processTxAx25(job->data, job->len, ax25TxScheduler.txDelayMs());
+  setMode(rxIdleMode());
+  // Apply the latest desired normal configuration only after PTT is released.
+  reconcileDesiredState(false);
+  ax25TxScheduler.complete();
+  sendCurrentDeviceState();
+  esp_task_wdt_reset();
 }
 
 void rssiLoop() {
@@ -607,6 +657,7 @@ void loop() {
   bluetoothLoop();
   bleKissLoop();
   rxAudioLoop();
+  ax25TxLoop();
   txAudioLoop();
   rssiLoop();
   deviceStateLoop();

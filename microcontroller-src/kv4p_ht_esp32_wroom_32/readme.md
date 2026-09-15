@@ -76,7 +76,16 @@ All other bytes are written unchanged. The old `0xDEADBEEF` delimiter and top-le
 | KISS Command | Name                   | Description                       |
 | ------------ | ---------------------- | --------------------------------- |
 | `0x00`       | KISS DATA frame        | Transmit AX.25 packet bytes       |
+| `0x01`       | KISS TXDELAY            | Set TX lead time in 10 ms units   |
+| `0x02`       | KISS PERSIST            | Set p-persistence probability     |
+| `0x03`       | KISS SLOTTIME           | Set CSMA slot time in 10 ms units |
 | `0x06`       | KISS SETHARDWARE frame | Carry a kv4p vendor command frame |
+
+Firmware queues exactly two outbound AX.25 jobs in FIFO order. A job waits for a clear carrier,
+then for SLOTTIME and a PERSIST decision; a busy channel restarts CSMA without blocking normal
+firmware work. A third job is dropped. Defaults are TXDELAY 650 ms, PERSIST 63, and SLOTTIME
+100 ms. TXDELAY currently uses the modem's fixed flag preamble plus configurable carrier silence;
+the bundled esp32-afsk API cannot set a variable flag preamble at runtime.
 
 ## Incoming KV4P Vendor Commands (Android → ESP32)
 
@@ -86,6 +95,11 @@ Audio command ID `0x07` was used by the historical Opus voice stream. Current fi
 | ------------ | ----------------------- | -------------------------------------------------------------- |
 | `0x0C`       | `COMMAND_HOST_TX_AUDIO` | Receive Tx 4-bit ADPCM audio data (payload required, flow-controlled) |
 | `0x0D`       | `COMMAND_HOST_DESIRED_STATE` | Desired radio/control state snapshot                     |
+| `0x0E`       | `COMMAND_HOST_TX_AX25` | Queue an AX.25 job with temporary TX configuration |
+
+`COMMAND_HOST_TX_AX25` payload is packed as `float freqTx`, `uint8 bw`, `uint8 ctcssTx`, then
+the AX.25 bytes. The override belongs to the queued job and is applied only after it wins CSMA.
+After its transmission, firmware reconciles the latest normal desired radio state.
 
 ## Outgoing KISS Frame Types (ESP32 → Android)
 

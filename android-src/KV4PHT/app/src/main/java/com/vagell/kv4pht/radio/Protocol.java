@@ -31,6 +31,7 @@ public final class Protocol {
     static final int KISS_TFEND = 0xDC;
     static final int KISS_TFESC = 0xDD;
     static final int KISS_CMD_DATA = 0x00;
+    static final int KISS_CMD_TXDELAY = 0x01;
     static final int KISS_CMD_SETHARDWARE = 0x06;
     static final int KISS_PORT_0 = 0x00;
     static final int KV4P_PROTOCOL_VERSION = 0x01;
@@ -54,7 +55,8 @@ public final class Protocol {
     public enum SndCommand {
         COMMAND_SND_UNKNOWN(0x00),
         COMMAND_HOST_TX_AUDIO(0x0C), // [COMMAND_HOST_TX_AUDIO(byte[])]
-        COMMAND_HOST_DESIRED_STATE(0x0D);
+        COMMAND_HOST_DESIRED_STATE(0x0D),
+        COMMAND_HOST_TX_AX25(0x0E); // [float freqTx, uint8 bw, uint8 ctcssTx, AX.25 bytes]
         private final int value;
         SndCommand(int value) {
             this.value = value;
@@ -362,6 +364,31 @@ public final class Protocol {
 
         public void txAx25(byte[] ax25Bytes) {
             sendKissDataFrame(ax25Bytes);
+        }
+
+        /**
+         * Queues an AX.25 packet using a temporary transmit configuration. The
+         * firmware restores its normal receive configuration after the packet.
+         */
+        public void txAx25OnFrequency(float freqTx, byte bandwidth, byte ctcssTx, byte[] ax25Bytes) {
+            int ax25Len = boundedPayloadLen(ax25Bytes, ax25Bytes != null ? ax25Bytes.length : 0);
+            byte[] payload = new byte[6 + ax25Len];
+            ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+                .putFloat(freqTx)
+                .put(bandwidth)
+                .put(ctcssTx);
+            if (ax25Len > 0) {
+                System.arraycopy(ax25Bytes, 0, payload, 6, ax25Len);
+            }
+            sendKv4pVendorFrame(SndCommand.COMMAND_HOST_TX_AX25, payload, payload.length);
+        }
+
+        /** Sets KISS TXDELAY in standard 10 ms units. */
+        public void setKissTxDelay(int value) {
+            if (value < 0 || value > 0xFF) {
+                throw new IllegalArgumentException("KISS TXDELAY must fit in one byte");
+            }
+            sendKissFrame(KISS_CMD_TXDELAY, new byte[]{(byte) value}, 1);
         }
 
         private int encodeKissFrame(int kissCommand, byte[] payload, int len) {

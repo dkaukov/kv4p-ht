@@ -149,6 +149,42 @@ public class ProtocolKissTest {
     }
 
     @Test
+    public void senderEncodesKissTxDelay() {
+        List<byte[]> frames = new ArrayList<>();
+        Protocol.Sender sender = new Protocol.Sender(frames::add, false);
+
+        sender.setKissTxDelay(75);
+
+        assertEquals(1, frames.size());
+        assertArrayEquals(new byte[]{
+            (byte) Protocol.KISS_FEND,
+            Protocol.KISS_CMD_TXDELAY,
+            75,
+            (byte) Protocol.KISS_FEND,
+        }, frames.get(0));
+    }
+
+    @Test
+    public void senderEncodesAx25FrequencyOverride() {
+        List<byte[]> frames = new ArrayList<>();
+        Protocol.Sender sender = new Protocol.Sender(frames::add, false);
+
+        sender.txAx25OnFrequency(144.3900f, Protocol.DRA818_12K5, (byte) 7, new byte[]{0x11, 0x22});
+
+        ByteBuffer payload = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+        payload.putFloat(144.3900f);
+        payload.put(Protocol.DRA818_12K5);
+        payload.put((byte) 7);
+        payload.put((byte) 0x11);
+        payload.put((byte) 0x22);
+        assertEquals(1, frames.size());
+        assertArrayEquals(buildKissFrame(
+            Protocol.KISS_CMD_SETHARDWARE,
+            buildKv4pVendorPayload(Protocol.SndCommand.COMMAND_HOST_TX_AX25.getValue(), payload.array())),
+            frames.get(0));
+    }
+
+    @Test
     public void parserUnescapesDataFrameAndDispatchesAx25() {
         Protocol.KissParser parser = newParser();
         parser.processBytes(new byte[]{

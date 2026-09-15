@@ -49,11 +49,10 @@ inline void formatBluetoothDeviceName(char *out, size_t outSize) {
   snprintf(out, outSize, "kv4p-%06X", bluetoothDeviceId());
 }
 
-// Firmware AX.25 TX tuning. Lead/tail silence matches the previous Android-side AFSK encoder timing.
+// AX.25 I2S tail lets the final samples drain from the six 512-sample DMA buffers.
 static constexpr size_t TX_AFSK_BLOCK_SAMPLES = 256;
 static constexpr float TX_AFSK_GAIN = 0.8f;
-static constexpr float TX_AFSK_LEAD_SILENCE_MS = 1100.0f;
-static constexpr float TX_AFSK_TAIL_SILENCE_MS = 700.0f;
+static constexpr float TX_AFSK_TAIL_SILENCE_MS = 70.0f;
 
 // Maximum length of the frame
 #define PROTO_MTU 2048
