@@ -1786,7 +1786,7 @@ public class RadioAudioService extends Service {
     private void performPositionBeacon(final double latitude, final double longitude) {
         if (CURRENT_FREQUENCY.equals(aprsBeaconFrequency)) {
             callbacks.startingAprsBeacon(activeFrequencyStr);
-            sendPositionBeacon(latitude, longitude, Float.NaN, activeFrequencyStr);
+            sendPositionBeaconOnActiveChannel(latitude, longitude, activeFrequencyStr);
             return;
         }
 
@@ -1803,7 +1803,17 @@ public class RadioAudioService extends Service {
         }
 
         callbacks.startingAprsBeacon(aprsBeaconFrequency);
-        sendPositionBeacon(latitude, longitude, beaconFrequency, aprsBeaconFrequency);
+        sendPositionBeaconOnSideChannel(latitude, longitude, beaconFrequency, aprsBeaconFrequency);
+    }
+
+    private void sendPositionBeaconOnActiveChannel(final double latitude, final double longitude,
+                                                   final String beaconFrequency) {
+        sendPositionBeacon(latitude, longitude, null, beaconFrequency);
+    }
+
+    private void sendPositionBeaconOnSideChannel(final double latitude, final double longitude,
+                                                 final float txFrequency, final String beaconFrequency) {
+        sendPositionBeacon(latitude, longitude, txFrequency, beaconFrequency);
     }
 
     /**
@@ -1812,10 +1822,10 @@ public class RadioAudioService extends Service {
      *
      * @param latitude  The latitude to beacon.
      * @param longitude The longitude to beacon.
-     * @param txFrequency Frequency for a temporary TX override, or NaN for the active frequency.
+     * @param txFrequency Frequency for a temporary TX override, or null for the active channel.
      * @param beaconFrequency Display frequency for this beacon.
      */
-    private void sendPositionBeacon(final double latitude, final double longitude, final float txFrequency,
+    private void sendPositionBeacon(final double latitude, final double longitude, final Float txFrequency,
                                     final String beaconFrequency) {
         if (getMode() != RadioMode.RX) {
             Log.d(TAG, "Skipping position beacon because not in RX mode");
@@ -1832,7 +1842,7 @@ public class RadioAudioService extends Service {
             final APRSPacket aprsPacket = new APRSPacket(callsign, DEFAULT_DIGIPEATERS, posField.getRawBytes());
             aprsPacket.getPayload().addAprsData(APRSTypes.T_POSITION, posField);
             Packet packet = new Packet(aprsPacket.toAX25Frame());
-            if (Float.isNaN(txFrequency)) {
+            if (txFrequency == null) {
                 if (txAX25Packet(packet)) {
                     callbacks.sentAprsBeacon(myPos.getLatitude(), myPos.getLongitude(), beaconFrequency, false);
                 }
