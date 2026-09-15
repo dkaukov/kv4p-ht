@@ -24,9 +24,11 @@ import android.net.Uri;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.vagell.kv4pht.R;
@@ -39,6 +41,38 @@ import java.util.Locale;
 
 public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder> {
     public List<AprsEvent> aprsEvents;
+
+    static DeliveryStatusStyle deliveryStatusStyle(int deliveryState) {
+        switch (deliveryState) {
+            case AprsEvent.DELIVERY_PENDING:
+                return new DeliveryStatusStyle(R.drawable.ic_pending,
+                    R.string.aprs_delivery_pending, R.color.primary_deselected);
+            case AprsEvent.DELIVERY_DELIVERED:
+                return new DeliveryStatusStyle(R.drawable.ic_check,
+                    R.string.aprs_delivery_delivered, R.color.primary);
+            case AprsEvent.DELIVERY_REJECTED:
+                return new DeliveryStatusStyle(R.drawable.ic_rejected,
+                    R.string.aprs_delivery_rejected, R.color.accent);
+            case AprsEvent.DELIVERY_FAILED:
+                return new DeliveryStatusStyle(R.drawable.ic_failed,
+                    R.string.aprs_delivery_failed, R.color.accent);
+            case AprsEvent.DELIVERY_NONE:
+            default:
+                return null;
+        }
+    }
+
+    static final class DeliveryStatusStyle {
+        final int drawable;
+        final int description;
+        final int color;
+
+        DeliveryStatusStyle(int drawable, int description, int color) {
+            this.drawable = drawable;
+            this.description = description;
+            this.color = color;
+        }
+    }
 
     public APRSAdapter() {
         this.aprsEvents = new ArrayList<>();
@@ -104,7 +138,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             case AprsEvent.MESSAGE_TYPE:
                 holder.setToCallsign(aprsEvent.toCallsign);
                 holder.setMsgBody(aprsEvent.body);
-                holder.setWasAcknowledged(aprsEvent.deliveryState == AprsEvent.DELIVERY_DELIVERED);
+                holder.setDeliveryState(aprsEvent.deliveryState);
                 break;
             case AprsEvent.OBJECT_TYPE:
                 holder.setObjName(aprsEvent.objectName);
@@ -146,7 +180,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         TextView textViewWindDir;
         TextView textViewToCallsign;
         TextView textViewMsgBody;
-        View ackIcon;
+        ImageView deliveryStatusIcon;
         TextView textViewObjName;
         TextView textViewRelayCallsign;
         TextView textViewRelayViaLabel;
@@ -169,7 +203,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             textViewWindDir = itemView.findViewById(R.id.windDirection);
             textViewToCallsign = itemView.findViewById(R.id.toCallsign);
             textViewMsgBody = itemView.findViewById(R.id.messageBody);
-            ackIcon = itemView.findViewById(R.id.msgAck);
+            deliveryStatusIcon = itemView.findViewById(R.id.messageDeliveryStatus);
             textViewObjName = itemView.findViewById(R.id.objName);
             textViewRelayCallsign = itemView.findViewById(R.id.relayCallsign);
             textViewRelayViaLabel = itemView.findViewById(R.id.relayViaLabel);
@@ -280,11 +314,20 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             textViewMsgBody.setText(msgBody);
         }
 
-        public void setWasAcknowledged(boolean ack) {
-            if (null == ackIcon) {
+        public void setDeliveryState(int deliveryState) {
+            if (deliveryStatusIcon == null) return;
+            DeliveryStatusStyle style = deliveryStatusStyle(deliveryState);
+            if (style == null) {
+                deliveryStatusIcon.setVisibility(View.GONE);
+                deliveryStatusIcon.setContentDescription(null);
                 return;
             }
-            ackIcon.setVisibility(ack ? View.VISIBLE : View.GONE);
+            deliveryStatusIcon.setImageResource(style.drawable);
+            deliveryStatusIcon.setColorFilter(
+                ContextCompat.getColor(itemView.getContext(), style.color));
+            deliveryStatusIcon.setContentDescription(
+                itemView.getContext().getString(style.description));
+            deliveryStatusIcon.setVisibility(View.VISIBLE);
         }
 
         public void setObjName(String objName) {

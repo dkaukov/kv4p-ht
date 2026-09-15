@@ -113,6 +113,10 @@
     <string name="aprs_message_filter">Message filter</string>
     <string name="aprs_show_all">Show all</string>
     <string name="aprs_only_mine">Only mine</string>
+    <string name="aprs_delivery_pending">Message awaiting acknowledgment</string>
+    <string name="aprs_delivery_delivered">Message acknowledged</string>
+    <string name="aprs_delivery_rejected">Message rejected</string>
+    <string name="aprs_delivery_failed">Message delivery failed</string>
     <string name="all">All</string>
     <string name="mine">Mine</string>
     <string name="aprs_icon_phone">Phone</string>
