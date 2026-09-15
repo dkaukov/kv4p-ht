@@ -88,14 +88,12 @@
             android:contentDescription="Show sender's position"
             android:visibility="gone"/>
 
-        <TextView
+        <ImageView
             android:id="@+id/msgAck"
             android:layout_width="24dp"
             android:layout_height="24dp"
-            android:gravity="center"
-            android:text="✓"
-            android:textColor="@color/primary"
-            android:textSize="18sp"
+            android:background="@drawable/ic_check"
+            android:alpha="0.8"
             android:contentDescription="Checkmark, message acknowledged"
             android:visibility="gone"/>
 
