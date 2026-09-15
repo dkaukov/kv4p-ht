@@ -171,16 +171,16 @@ public class ProtocolKissTest {
 
         sender.txAx25OnFrequency(144.3900f, Protocol.DRA818_12K5, (byte) 7, new byte[]{0x11, 0x22});
 
-        ByteBuffer payload = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
-        payload.putFloat(144.3900f);
-        payload.put(Protocol.DRA818_12K5);
-        payload.put((byte) 7);
-        payload.put((byte) 0x11);
-        payload.put((byte) 0x22);
+        ByteBuffer overridePayload = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+        overridePayload.putFloat(144.3900f);
+        overridePayload.put(Protocol.DRA818_12K5);
+        overridePayload.put((byte) 7);
+        overridePayload.put((byte) 0x11);
+        overridePayload.put((byte) 0x22);
         assertEquals(1, frames.size());
         assertArrayEquals(buildKissFrame(
             Protocol.KISS_CMD_SETHARDWARE,
-            buildKv4pVendorPayload(Protocol.SndCommand.COMMAND_HOST_TX_AX25.getValue(), payload.array())),
+            buildKv4pVendorPayload(Protocol.SndCommand.COMMAND_HOST_TX_AX25.getValue(), overridePayload.array())),
             frames.get(0));
     }
 
