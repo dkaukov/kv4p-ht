@@ -106,7 +106,8 @@ Audio command ID `0x07` was used by the historical Opus voice stream. Current fi
 
 `COMMAND_HOST_TX_AX25` payload is packed as `float freqTx`, `uint8 bw`, `uint8 ctcssTx`, then
 the AX.25 bytes. Before CSMA, firmware temporarily tunes both RX and TX to the target frequency,
-waits for the receiver and carrier detectors to settle, then senses and transmits on that target.
+waits 260 ms for the receiver and carrier detectors to settle, then senses and transmits on that
+target. This preparation occurs only while the radio is idle and host TX remains allowed.
 After its transmission, firmware restores the latest normal desired radio state.
 
 ## Outgoing KISS Frame Types (ESP32 → Android)

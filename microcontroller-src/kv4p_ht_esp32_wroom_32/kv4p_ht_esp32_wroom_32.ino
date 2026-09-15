@@ -71,7 +71,9 @@ KissParser bluetoothParser(protocolBtSession, &handleCommands, &handleAx25Data,
 KissParser bleKissParser(protocolBleSession, &handleCommands, &handleAx25Data,
   &handleKissParameter);
 Ax25TxScheduler ax25TxScheduler;
-static constexpr uint16_t AX25_OVERRIDE_RX_SETTLE_MS = 100;
+// SoftSQ needs its 250 ms close/open interval after a retune before its raw
+// HF-noise carrier decision is reliable. Keep a small loop-timing margin.
+static constexpr uint16_t AX25_OVERRIDE_RX_SETTLE_MS = 260;
 bool ax25OverrideChannelPrepared = false;
 uint32_t ax25OverrideChannelReadyAt = 0;
 
@@ -522,6 +524,8 @@ void prepareAx25TxOverrideChannel(const Ax25TxOverride &txOverride, uint32_t now
 void ax25TxLoop() {
   const Ax25TxJob *pendingJob = ax25TxScheduler.head();
   if (pendingJob == nullptr) return;
+  bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
+  if (!receiveIdle || !txAllowedByHost()) return;
   uint32_t now = millis();
   if (pendingJob->hasTxOverride) {
     // A host configuration update may have restored the normal radio while
@@ -539,8 +543,7 @@ void ax25TxLoop() {
   bool afskDcd = afskDemod.carrierDetected();
   bool rfCarrierDetected = softSquelchEffect.isCarrierDetected();
   bool channelBusy = ourTx || afskDcd || rfCarrierDetected;
-  bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
-  bool channelClear = receiveIdle && !channelBusy && txAllowedByHost();
+  bool channelClear = !channelBusy;
   if (!ax25TxScheduler.ready(now, channelClear, (uint8_t)esp_random())) {
     return;
   }
