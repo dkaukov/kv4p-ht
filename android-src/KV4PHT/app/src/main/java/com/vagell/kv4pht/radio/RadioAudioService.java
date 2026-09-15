@@ -1750,20 +1750,19 @@ public class RadioAudioService extends Service {
     public void sendPositionBeacon() {
         boolean isScanning = getMode() == RadioMode.SCAN;
         boolean isRx = getMode() == RadioMode.RX;
-        boolean isCurrent = CURRENT_FREQUENCY.equals(aprsBeaconFrequency);
 
         if (!isRadioConnected() || !isTxAllowed()) {
             Log.d(TAG, "Skipping position beacon: radio disconnected or tx not allowed.");
             return;
         }
 
-        if (isScanning && isCurrent) {
-            Log.d(TAG, "Skipping position beacon: scanning and set to 'Current' frequency.");
+        if (isScanning) {
+            Log.d(TAG, "Skipping position beacon: scanning is active.");
             return;
         }
 
-        if (!isRx && !isScanning) {
-            Log.d(TAG, "Skipping position beacon: not in RX or SCAN mode.");
+        if (!isRx) {
+            Log.d(TAG, "Skipping position beacon: not in RX mode.");
             return;
         }
 
@@ -1818,8 +1817,8 @@ public class RadioAudioService extends Service {
      */
     private void sendPositionBeacon(final double latitude, final double longitude, final float txFrequency,
                                     final String beaconFrequency) {
-        if (getMode() != RadioMode.RX && getMode() != RadioMode.SCAN) {
-            Log.d(TAG, "Skipping position beacon because not in RX or SCAN mode");
+        if (getMode() != RadioMode.RX) {
+            Log.d(TAG, "Skipping position beacon because not in RX mode");
             return;
         }
         Log.i(TAG, "Beaconing position via APRS");
