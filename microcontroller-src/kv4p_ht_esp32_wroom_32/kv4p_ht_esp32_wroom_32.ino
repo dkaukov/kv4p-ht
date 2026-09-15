@@ -512,11 +512,11 @@ void applyAx25TxOverride(const Ax25TxOverride &txOverride) {
 }
 
 void ax25TxLoop() {
-  // SoftSQ is an RF/voice carrier estimate only while it is enabled. Its
-  // bypass state is always open and must not permanently block packet TX.
+  // Use SoftSQ's raw HF-noise decision for RF/voice carrier detection. Audio
+  // CTCSS and UI-squelch choices must not affect CSMA channel access.
   bool ourTx = mode == MODE_TX;
   bool afskDcd = afskDemod.carrierDetected();
-  bool rfCarrierDetected = softSquelchEffect.getDeadbandLevel() > 0 && !squelched;
+  bool rfCarrierDetected = softSquelchEffect.isCarrierDetected();
   bool channelBusy = ourTx || afskDcd || rfCarrierDetected;
   bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
   bool channelClear = receiveIdle && !channelBusy && txAllowedByHost();

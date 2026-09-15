@@ -88,8 +88,8 @@ firmware work. A third job is dropped. Defaults are TXDELAY 650 ms, PERSIST 63, 
 the bundled esp32-afsk API cannot set a variable flag preamble at runtime.
 
 Channel busy is `ourTx || afskDcd || rfCarrierDetected`. `afskDcd` is the qualified AFSK flag
-detector. `rfCarrierDetected` is `!squelched` only while SoftSQ is enabled; a bypassed SoftSQ is
-always open and therefore does not participate in channel access.
+detector. `rfCarrierDetected` is SoftSQ's raw HF-noise decision, independent of CTCSS and UI
+squelch settings.
 
 ## Incoming KV4P Vendor Commands (Android → ESP32)
 

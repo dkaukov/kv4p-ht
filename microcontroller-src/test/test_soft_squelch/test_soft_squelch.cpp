@@ -34,6 +34,16 @@ void test_soft_squelch_opens_for_afsk_and_closes_for_hf_noise() {
   mod.modulate(payload, sizeof(payload), buffer, sizeof(buffer) / sizeof(buffer[0]));
   processSamples(squelch, afskSamples);
   TEST_ASSERT_TRUE_MESSAGE(squelch.isSoftOpen(), "Clean 1200/2200 Hz AFSK should open soft squelch");
+  TEST_ASSERT_TRUE_MESSAGE(squelch.isCarrierDetected(), "Clean AFSK should assert the raw carrier decision");
+
+  SoftSquelchEffect ctcssSquelch(AUDIO_SAMPLE_RATE, ZCR_DECAY_TIME, SQ_CLOSE_DELAY);
+  ctcssSquelch.setActive(true);
+  ctcssSquelch.setHardwareSquelched(false);
+  ctcssSquelch.setDeadbandLevel(1);
+  ctcssSquelch.setCtcssTone(1);
+  processSamples(ctcssSquelch, afskSamples);
+  TEST_ASSERT_FALSE_MESSAGE(ctcssSquelch.isSoftOpen(), "AFSK without the selected CTCSS tone should remain muted");
+  TEST_ASSERT_TRUE_MESSAGE(ctcssSquelch.isCarrierDetected(), "CTCSS must not suppress the CSMA carrier decision");
 
   std::vector<float> highFrequencyNoise(AUDIO_SAMPLE_RATE / 2);
   for (size_t i = 0; i < highFrequencyNoise.size(); i++) {
