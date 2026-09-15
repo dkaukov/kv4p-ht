@@ -2008,8 +2008,8 @@ public class RadioAudioService extends Service {
             Log.e(TAG, "Tried to send an AX.25 packet on a disallowed frequency, did not send.");
             return false;
         }
-        if (getMode() != RadioMode.RX && getMode() != RadioMode.SCAN) {
-            Log.e(TAG, "Tried to send an AX.25 packet when radio was not receiving, did not send.");
+        if (getMode() != RadioMode.RX) {
+            Log.e(TAG, "Tried to send an AX.25 packet when radio was not in RX mode, did not send.");
             return false;
         }
         Protocol.Sender sender = hostToEsp32;

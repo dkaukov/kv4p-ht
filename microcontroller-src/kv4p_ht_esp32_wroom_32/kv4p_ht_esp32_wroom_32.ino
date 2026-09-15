@@ -508,7 +508,7 @@ void handleKissParameter(uint8_t command, uint8_t value) {
   else if (command == KISS_CMD_SLOTTIME) ax25TxScheduler.setSlotTime(value);
 }
 
-void prepareAx25TxOverrideChannel(const Ax25TxOverride &txOverride, uint32_t now) {
+void prepareAx25TxOverrideChannel(const Ax25TxOverride &txOverride) {
   drainRadioSerial();
   // Tune RX to the packet's target before carrier sense. The normal radio
   // configuration is deliberately marked stale so it is restored after TX.
@@ -518,7 +518,7 @@ void prepareAx25TxOverrideChannel(const Ax25TxOverride &txOverride, uint32_t now
   }
   radioConfigApplied = false;
   ax25OverrideChannelPrepared = true;
-  ax25OverrideChannelReadyAt = now + AX25_OVERRIDE_RX_SETTLE_MS;
+  ax25OverrideChannelReadyAt = millis() + AX25_OVERRIDE_RX_SETTLE_MS;
 }
 
 void ax25TxLoop() {
@@ -531,7 +531,7 @@ void ax25TxLoop() {
     // A host configuration update may have restored the normal radio while
     // this job was waiting, so prepare the target channel again in that case.
     if (!ax25OverrideChannelPrepared || radioConfigApplied) {
-      prepareAx25TxOverrideChannel(pendingJob->txOverride, now);
+      prepareAx25TxOverrideChannel(pendingJob->txOverride);
       return;
     }
     if ((int32_t)(now - ax25OverrideChannelReadyAt) < 0) return;

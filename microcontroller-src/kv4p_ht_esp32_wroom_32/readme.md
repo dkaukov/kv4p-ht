@@ -89,6 +89,8 @@ sent under one PTT assertion after winning CSMA; frequency-override jobs are sen
 Defaults are TXDELAY 650 ms, PERSIST 63, and SLOTTIME 100 ms. TXDELAY currently uses the modem's
 fixed flag preamble plus configurable carrier silence; the bundled esp32-afsk API cannot set a
 variable flag preamble at runtime.
+TXDELAY and SLOTTIME are one-byte 10 ms values (65 and 10 by default); PERSIST is a
+one-byte p-persistence probability value from 0 to 255 (63 by default).
 
 Channel busy is `ourTx || afskDcd || rfCarrierDetected`. `afskDcd` is the qualified AFSK flag
 detector. `rfCarrierDetected` is SoftSQ's raw HF-noise decision, independent of CTCSS and UI
