@@ -43,6 +43,7 @@ public:
     if (frame == nullptr || len == 0 || len > PROTO_MTU || _count == AX25_TX_QUEUE_SIZE) {
       return false;
     }
+    bool wasEmpty = _count == 0;
     Ax25TxJob &job = _jobs[_tail];
     job.len = (uint16_t)len;
     memcpy(job.data, frame, len);
@@ -50,7 +51,7 @@ public:
     if (txOverride) job.txOverride = *txOverride;
     _tail = (_tail + 1) % AX25_TX_QUEUE_SIZE;
     _count++;
-    _slotPending = false;
+    if (wasEmpty) _slotPending = false;
     return true;
   }
 
@@ -61,6 +62,9 @@ public:
       return false;
     }
     if (!_slotPending) {
+      if (randomValue <= _persist) {
+        return true;
+      }
       _slotAt = now + slotTimeMs();
       _slotPending = true;
       return false;
@@ -75,6 +79,7 @@ public:
   }
 
   const Ax25TxJob *head() const { return _count ? &_jobs[_head] : nullptr; }
+  const Ax25TxJob *next() const { return _count > 1 ? &_jobs[(_head + 1) % AX25_TX_QUEUE_SIZE] : nullptr; }
   uint8_t count() const { return _count; }
 
   void complete() {

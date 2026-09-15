@@ -371,7 +371,10 @@ public final class Protocol {
          * firmware restores its normal receive configuration after the packet.
          */
         public void txAx25OnFrequency(float freqTx, byte bandwidth, byte ctcssTx, byte[] ax25Bytes) {
-            int ax25Len = boundedPayloadLen(ax25Bytes, ax25Bytes != null ? ax25Bytes.length : 0);
+            int ax25Len = ax25Bytes != null ? ax25Bytes.length : 0;
+            if (ax25Len > PROTO_MTU - 6) {
+                throw new IllegalArgumentException("AX.25 frequency-override packet exceeds protocol MTU");
+            }
             byte[] payload = new byte[6 + ax25Len];
             ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
                 .putFloat(freqTx)

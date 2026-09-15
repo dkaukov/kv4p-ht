@@ -1834,8 +1834,9 @@ public class RadioAudioService extends Service {
             aprsPacket.getPayload().addAprsData(APRSTypes.T_POSITION, posField);
             Packet packet = new Packet(aprsPacket.toAX25Frame());
             if (Float.isNaN(txFrequency)) {
-                txAX25Packet(packet);
-                callbacks.sentAprsBeacon(myPos.getLatitude(), myPos.getLongitude(), beaconFrequency, false);
+                if (txAX25Packet(packet)) {
+                    callbacks.sentAprsBeacon(myPos.getLatitude(), myPos.getLongitude(), beaconFrequency, false);
+                }
             } else {
                 if (txAX25PacketOnFrequency(packet, txFrequency)) {
                     callbacks.sentAprsBeacon(myPos.getLatitude(), myPos.getLongitude(), beaconFrequency, false);
@@ -1983,23 +1984,24 @@ public class RadioAudioService extends Service {
      *
      * @param ax25Packet The AX.25 packet to send.
      */
-    private void txAX25Packet(Packet ax25Packet) {
+    private boolean txAX25Packet(Packet ax25Packet) {
         if (!isTxAllowed()) {
             Log.e(TAG, "Tried to send an AX.25 packet when tx is not allowed, did not send.");
-            return;
+            return false;
         }
         if (getMode() != RadioMode.RX) {
             Log.e(TAG, "Tried to send an AX.25 packet when radio was not in RX mode, did not send.");
-            return;
+            return false;
         }
         Protocol.Sender sender = hostToEsp32;
         if (sender == null) {
             Log.e(TAG, "Tried to send AX.25 packet with no ESP32 connection.");
-            return;
+            return false;
         }
         Log.d(TAG, "Sending AX25 packet: " + ax25Packet);
         sender.txAx25(ax25Packet.bytesWithoutCRC());
         Log.i(TAG, "Send AX25 packet: " + ax25Packet);
+        return true;
     }
 
     private boolean txAX25PacketOnFrequency(Packet ax25Packet, float txFrequency) {

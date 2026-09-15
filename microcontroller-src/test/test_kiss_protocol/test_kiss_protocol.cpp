@@ -218,7 +218,7 @@ void test_ax25_scheduler_holds_two_copied_frames_in_fifo_order() {
   TEST_ASSERT_FALSE(scheduler.enqueue(second, sizeof(second)));
 }
 
-void test_ax25_scheduler_waits_for_clear_channel_then_persistence_slot() {
+void test_ax25_scheduler_tests_persistence_immediately_when_channel_clears() {
   Ax25TxScheduler scheduler;
   const uint8_t frame[] = {0x11};
   TEST_ASSERT_TRUE(scheduler.enqueue(frame, sizeof(frame)));
@@ -226,10 +226,9 @@ void test_ax25_scheduler_waits_for_clear_channel_then_persistence_slot() {
   scheduler.setSlotTime(10);
   scheduler.setPersist(63);
   TEST_ASSERT_FALSE(scheduler.ready(0, false, 0));
-  TEST_ASSERT_FALSE(scheduler.ready(100, true, 0));
+  TEST_ASSERT_FALSE(scheduler.ready(100, true, 64));
   TEST_ASSERT_FALSE(scheduler.ready(199, true, 0));
-  TEST_ASSERT_FALSE(scheduler.ready(200, true, 64));
-  TEST_ASSERT_TRUE(scheduler.ready(300, true, 63));
+  TEST_ASSERT_TRUE(scheduler.ready(200, true, 63));
 }
 
 void test_ax25_scheduler_restarts_defer_when_channel_becomes_busy() {
@@ -240,9 +239,21 @@ void test_ax25_scheduler_restarts_defer_when_channel_becomes_busy() {
   scheduler.setSlotTime(10);
   TEST_ASSERT_FALSE(scheduler.ready(0, true, 100));
   TEST_ASSERT_FALSE(scheduler.ready(50, false, 100));
-  TEST_ASSERT_FALSE(scheduler.ready(60, true, 0));
-  TEST_ASSERT_FALSE(scheduler.ready(159, true, 0));
-  TEST_ASSERT_TRUE(scheduler.ready(160, true, 0));
+  TEST_ASSERT_TRUE(scheduler.ready(60, true, 0));
+}
+
+void test_ax25_scheduler_does_not_restart_head_backoff_when_second_frame_arrives() {
+  Ax25TxScheduler scheduler;
+  const uint8_t first[] = {0x11};
+  const uint8_t second[] = {0x22};
+  TEST_ASSERT_TRUE(scheduler.enqueue(first, sizeof(first)));
+  scheduler.setSlotTime(10);
+  scheduler.setPersist(63);
+
+  TEST_ASSERT_FALSE(scheduler.ready(0, true, 64));
+  TEST_ASSERT_TRUE(scheduler.enqueue(second, sizeof(second)));
+  TEST_ASSERT_FALSE(scheduler.ready(99, true, 0));
+  TEST_ASSERT_TRUE(scheduler.ready(100, true, 63));
 }
 
 void test_ax25_scheduler_uses_kiss_txdelay_units() {
@@ -532,8 +543,9 @@ static int runKissProtocolTests() {
   RUN_TEST(test_txdelay_frame_dispatches_kiss_parameter);
   RUN_TEST(test_persist_and_slottime_frames_dispatch_kiss_parameters);
   RUN_TEST(test_ax25_scheduler_holds_two_copied_frames_in_fifo_order);
-  RUN_TEST(test_ax25_scheduler_waits_for_clear_channel_then_persistence_slot);
+  RUN_TEST(test_ax25_scheduler_tests_persistence_immediately_when_channel_clears);
   RUN_TEST(test_ax25_scheduler_restarts_defer_when_channel_becomes_busy);
+  RUN_TEST(test_ax25_scheduler_does_not_restart_head_backoff_when_second_frame_arrives);
   RUN_TEST(test_ax25_scheduler_uses_kiss_txdelay_units);
   RUN_TEST(test_ax25_scheduler_retains_frequency_override_with_job);
   RUN_TEST(test_multiple_complete_frames_in_one_buffer);

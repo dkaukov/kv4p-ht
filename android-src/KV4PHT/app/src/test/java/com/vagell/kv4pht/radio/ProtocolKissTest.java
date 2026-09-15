@@ -184,6 +184,14 @@ public class ProtocolKissTest {
             frames.get(0));
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void senderRejectsOversizeAx25FrequencyOverride() {
+        Protocol.Sender sender = new Protocol.Sender(frame -> { }, false);
+
+        sender.txAx25OnFrequency(144.3900f, Protocol.DRA818_12K5, (byte) 0,
+            new byte[Protocol.PROTO_MTU - 5]);
+    }
+
     @Test
     public void parserUnescapesDataFrameAndDispatchesAx25() {
         Protocol.KissParser parser = newParser();

@@ -138,7 +138,7 @@ void processTxAudio(uint8_t *src, size_t len) {
   esp_task_wdt_reset();
 }
 
-void processTxAx25(const uint8_t *src, size_t len, float txDelayMs) {
+void processTxAx25(const uint8_t *src, size_t len, float txDelayMs, float txTailMs) {
   if (!src || len == 0) {
     return;
   }
@@ -146,7 +146,7 @@ void processTxAx25(const uint8_t *src, size_t len, float txDelayMs) {
   // parameter is silence, so TXDELAY is currently carrier lead time, not an
   // exactly sized flag train.
   afskMod.modulate(src, len, txAfskBlock, TX_AFSK_BLOCK_SAMPLES, txDelayMs,
-    TX_AFSK_TAIL_SILENCE_MS);
+    txTailMs);
 }
 
 void releaseHostPtt() {

@@ -82,10 +82,13 @@ All other bytes are written unchanged. The old `0xDEADBEEF` delimiter and top-le
 | `0x06`       | KISS SETHARDWARE frame | Carry a kv4p vendor command frame |
 
 Firmware queues exactly two outbound AX.25 jobs in FIFO order. A job waits for a clear carrier,
-then for SLOTTIME and a PERSIST decision; a busy channel restarts CSMA without blocking normal
-firmware work. A third job is dropped. Defaults are TXDELAY 650 ms, PERSIST 63, and SLOTTIME
-100 ms. TXDELAY currently uses the modem's fixed flag preamble plus configurable carrier silence;
-the bundled esp32-afsk API cannot set a variable flag preamble at runtime.
+then immediately makes a PERSIST decision. A failed decision waits SLOTTIME before sensing again;
+a busy channel restarts CSMA without blocking normal firmware work. A third job is dropped, so the
+higher-level protocol/application must retry or pace traffic. Adjacent ordinary KISS DATA jobs are
+sent under one PTT assertion after winning CSMA; frequency-override jobs are sent separately.
+Defaults are TXDELAY 650 ms, PERSIST 63, and SLOTTIME 100 ms. TXDELAY currently uses the modem's
+fixed flag preamble plus configurable carrier silence; the bundled esp32-afsk API cannot set a
+variable flag preamble at runtime.
 
 Channel busy is `ourTx || afskDcd || rfCarrierDetected`. `afskDcd` is the qualified AFSK flag
 detector. `rfCarrierDetected` is SoftSQ's raw HF-noise decision, independent of CTCSS and UI
@@ -102,8 +105,9 @@ Audio command ID `0x07` was used by the historical Opus voice stream. Current fi
 | `0x0E`       | `COMMAND_HOST_TX_AX25` | Queue an AX.25 job with temporary TX configuration |
 
 `COMMAND_HOST_TX_AX25` payload is packed as `float freqTx`, `uint8 bw`, `uint8 ctcssTx`, then
-the AX.25 bytes. The override belongs to the queued job and is applied only after it wins CSMA.
-After its transmission, firmware reconciles the latest normal desired radio state.
+the AX.25 bytes. Before CSMA, firmware temporarily tunes both RX and TX to the target frequency,
+waits for the receiver and carrier detectors to settle, then senses and transmits on that target.
+After its transmission, firmware restores the latest normal desired radio state.
 
 ## Outgoing KISS Frame Types (ESP32 → Android)
 
