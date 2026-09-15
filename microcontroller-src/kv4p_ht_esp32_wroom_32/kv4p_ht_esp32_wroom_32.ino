@@ -512,10 +512,14 @@ void applyAx25TxOverride(const Ax25TxOverride &txOverride) {
 }
 
 void ax25TxLoop() {
-  // Qualified AFSK DCD is independent of SA818 squelch and audio UI state.
-  bool carrierClear = !afskDemod.carrierDetected();
+  // SoftSQ is an RF/voice carrier estimate only while it is enabled. Its
+  // bypass state is always open and must not permanently block packet TX.
+  bool ourTx = mode == MODE_TX;
+  bool afskDcd = afskDemod.carrierDetected();
+  bool rfCarrierDetected = softSquelchEffect.getDeadbandLevel() > 0 && !squelched;
+  bool channelBusy = ourTx || afskDcd || rfCarrierDetected;
   bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
-  bool channelClear = receiveIdle && carrierClear && txAllowedByHost();
+  bool channelClear = receiveIdle && !channelBusy && txAllowedByHost();
   if (!ax25TxScheduler.ready(millis(), channelClear, (uint8_t)esp_random())) {
     return;
   }

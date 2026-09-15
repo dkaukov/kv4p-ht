@@ -87,6 +87,10 @@ firmware work. A third job is dropped. Defaults are TXDELAY 650 ms, PERSIST 63, 
 100 ms. TXDELAY currently uses the modem's fixed flag preamble plus configurable carrier silence;
 the bundled esp32-afsk API cannot set a variable flag preamble at runtime.
 
+Channel busy is `ourTx || afskDcd || rfCarrierDetected`. `afskDcd` is the qualified AFSK flag
+detector. `rfCarrierDetected` is `!squelched` only while SoftSQ is enabled; a bypassed SoftSQ is
+always open and therefore does not participate in channel access.
+
 ## Incoming KV4P Vendor Commands (Android → ESP32)
 
 Audio command ID `0x07` was used by the historical Opus voice stream. Current firmware uses `0x0C` for 4-bit ADPCM audio so hosts can keep compatibility code for both the old Opus stream and the current ADPCM stream.
