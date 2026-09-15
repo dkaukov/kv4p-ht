@@ -22,6 +22,9 @@ public final class Protocol {
     private static final String TAG = Protocol.class.getSimpleName();
 
     public static final int PROTO_MTU = 2048; // Maximum length of the frame
+    // APRS maximum AX.25 UI frame excluding the FCS: ten 7-byte address fields,
+    // control/PID, and a 256-byte information field.
+    public static final int AX25_MAX_KISS_DATA_LEN = (10 * 7) + 2 + 256;
 
     // KV4P KISS transport. Standard KISS DATA frames carry AX.25 packets.
     // kv4p-specific commands are carried in KISS SETHARDWARE vendor frames:
@@ -355,6 +358,9 @@ public final class Protocol {
         }
 
         private void sendKissDataFrame(byte[] ax25Bytes) {
+            if (ax25Bytes != null && ax25Bytes.length > AX25_MAX_KISS_DATA_LEN) {
+                throw new IllegalArgumentException("AX.25 packet exceeds APRS maximum frame length");
+            }
             sendKissFrame(KISS_CMD_DATA, ax25Bytes, ax25Bytes != null ? ax25Bytes.length : 0);
         }
 
@@ -372,8 +378,8 @@ public final class Protocol {
          */
         public void txAx25OnFrequency(float freqTx, byte bandwidth, byte ctcssTx, byte[] ax25Bytes) {
             int ax25Len = ax25Bytes != null ? ax25Bytes.length : 0;
-            if (ax25Len > PROTO_MTU - 6) {
-                throw new IllegalArgumentException("AX.25 frequency-override packet exceeds protocol MTU");
+            if (ax25Len > AX25_MAX_KISS_DATA_LEN) {
+                throw new IllegalArgumentException("AX.25 packet exceeds APRS maximum frame length");
             }
             byte[] payload = new byte[6 + ax25Len];
             ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
@@ -604,7 +610,7 @@ public final class Protocol {
                 return;
             }
             if (kissCommand == KISS_CMD_DATA) {
-                if (payloadLen > 0 && payloadLen <= PROTO_MTU) {
+                if (payloadLen > 0 && payloadLen <= AX25_MAX_KISS_DATA_LEN) {
                     onAx25.accept(frameBuffer, 1, payloadLen);
                 }
             } else if (kissCommand == KISS_CMD_SETHARDWARE) {

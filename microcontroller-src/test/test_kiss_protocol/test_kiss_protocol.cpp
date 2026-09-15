@@ -218,6 +218,16 @@ void test_ax25_scheduler_holds_two_copied_frames_in_fifo_order() {
   TEST_ASSERT_FALSE(scheduler.enqueue(second, sizeof(second)));
 }
 
+void test_ax25_scheduler_limits_jobs_to_maximum_aprs_frame() {
+  Ax25TxScheduler scheduler;
+  static uint8_t maximumFrame[AX25_MAX_KISS_DATA_LEN] = {};
+  static uint8_t oversizedFrame[AX25_MAX_KISS_DATA_LEN + 1] = {};
+
+  TEST_ASSERT_TRUE(scheduler.enqueue(maximumFrame, sizeof(maximumFrame)));
+  scheduler.complete();
+  TEST_ASSERT_FALSE(scheduler.enqueue(oversizedFrame, sizeof(oversizedFrame)));
+}
+
 void test_ax25_scheduler_tests_persistence_immediately_when_channel_clears() {
   Ax25TxScheduler scheduler;
   const uint8_t frame[] = {0x11};
@@ -382,12 +392,12 @@ void test_vendor_frame_validates_prefix_and_version() {
   TEST_ASSERT_FALSE(captured.called);
 }
 
-void test_over_mtu_data_frame_is_dropped() {
+void test_oversized_ax25_data_frame_is_dropped() {
   resetCaptured();
-  uint8_t frame[PROTO_MTU + 4];
+  uint8_t frame[AX25_MAX_KISS_DATA_LEN + 4];
   frame[0] = KISS_FEND;
   frame[1] = KISS_CMD_DATA;
-  memset(frame + 2, 0x55, PROTO_MTU + 1);
+  memset(frame + 2, 0x55, AX25_MAX_KISS_DATA_LEN + 1);
   frame[sizeof(frame) - 1] = KISS_FEND;
 
   parseBytes(frame, sizeof(frame));
@@ -543,6 +553,7 @@ static int runKissProtocolTests() {
   RUN_TEST(test_txdelay_frame_dispatches_kiss_parameter);
   RUN_TEST(test_persist_and_slottime_frames_dispatch_kiss_parameters);
   RUN_TEST(test_ax25_scheduler_holds_two_copied_frames_in_fifo_order);
+  RUN_TEST(test_ax25_scheduler_limits_jobs_to_maximum_aprs_frame);
   RUN_TEST(test_ax25_scheduler_tests_persistence_immediately_when_channel_clears);
   RUN_TEST(test_ax25_scheduler_restarts_defer_when_channel_becomes_busy);
   RUN_TEST(test_ax25_scheduler_does_not_restart_head_backoff_when_second_frame_arrives);
@@ -554,7 +565,7 @@ static int runKissProtocolTests() {
   RUN_TEST(test_unknown_kiss_command_is_ignored);
   RUN_TEST(test_multiple_fend_bytes_are_ignored);
   RUN_TEST(test_vendor_frame_validates_prefix_and_version);
-  RUN_TEST(test_over_mtu_data_frame_is_dropped);
+  RUN_TEST(test_oversized_ax25_data_frame_is_dropped);
   RUN_TEST(test_unknown_escape_drops_frame_and_recovers);
   RUN_TEST(test_oversized_frame_is_dropped_and_recovers);
   RUN_TEST(test_send_kiss_data_frame_escapes_fend_and_fesc);

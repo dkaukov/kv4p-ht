@@ -189,7 +189,7 @@ public class ProtocolKissTest {
         Protocol.Sender sender = new Protocol.Sender(frame -> { }, false);
 
         sender.txAx25OnFrequency(144.3900f, Protocol.DRA818_12K5, (byte) 0,
-            new byte[Protocol.PROTO_MTU - 5]);
+            new byte[Protocol.AX25_MAX_KISS_DATA_LEN + 1]);
     }
 
     @Test
@@ -301,9 +301,9 @@ public class ProtocolKissTest {
     }
 
     @Test
-    public void parserDropsOverMtuDataFrame() {
+    public void parserDropsOversizedAx25DataFrame() {
         Protocol.KissParser parser = newParser();
-        byte[] frame = new byte[Protocol.PROTO_MTU + 4];
+        byte[] frame = new byte[Protocol.AX25_MAX_KISS_DATA_LEN + 4];
         frame[0] = (byte) Protocol.KISS_FEND;
         frame[1] = Protocol.KISS_CMD_DATA;
         for (int i = 2; i < frame.length - 1; i++) {

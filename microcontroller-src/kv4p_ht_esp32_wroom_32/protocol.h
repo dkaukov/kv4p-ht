@@ -283,8 +283,8 @@ void inline sendKissDataFrame(Stream &out, const uint8_t *ax25, size_t len) {
   if (ax25 == NULL) {
     len = 0;
   }
-  if (len > PROTO_MTU) {
-    len = PROTO_MTU;
+  if (len > AX25_MAX_KISS_DATA_LEN) {
+    len = AX25_MAX_KISS_DATA_LEN;
   }
   sendKissFrame(out, KISS_CMD_DATA, ax25, len);
 }
@@ -487,7 +487,7 @@ private:
       return;
     }
     if (kissCommand == KISS_CMD_DATA) {
-      if (payloadLen > 0 && payloadLen <= PROTO_MTU) {
+      if (payloadLen > 0 && payloadLen <= AX25_MAX_KISS_DATA_LEN) {
         _ax25Callback(payload, payloadLen);
       }
     } else if (kissCommand == KISS_CMD_TXDELAY || kissCommand == KISS_CMD_PERSIST || kissCommand == KISS_CMD_SLOTTIME) {

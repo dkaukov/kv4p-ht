@@ -31,7 +31,7 @@ static constexpr uint8_t AX25_TX_QUEUE_SIZE = 2;
 struct [[gnu::packed]] Ax25TxOverride { float freqTx; uint8_t bw; uint8_t ctcssTx; };
 struct Ax25TxJob {
   uint16_t len;
-  uint8_t data[PROTO_MTU];
+  uint8_t data[AX25_MAX_KISS_DATA_LEN];
   bool hasTxOverride;
   Ax25TxOverride txOverride;
 };
@@ -40,7 +40,7 @@ struct Ax25TxJob {
 class Ax25TxScheduler {
 public:
   bool enqueue(const uint8_t *frame, size_t len, const Ax25TxOverride *txOverride = nullptr) {
-    if (frame == nullptr || len == 0 || len > PROTO_MTU || _count == AX25_TX_QUEUE_SIZE) {
+    if (frame == nullptr || len == 0 || len > AX25_MAX_KISS_DATA_LEN || _count == AX25_TX_QUEUE_SIZE) {
       return false;
     }
     bool wasEmpty = _count == 0;

@@ -485,7 +485,7 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
         Ax25TxOverride txOverride;
         memcpy(&txOverride, params, sizeof(txOverride));
         size_t ax25Len = param_len - sizeof(txOverride);
-        if (isModuleRadioFreq(txOverride.freqTx) && ax25Len <= PROTO_MTU
+        if (isModuleRadioFreq(txOverride.freqTx) && ax25Len <= AX25_MAX_KISS_DATA_LEN
             && !ax25TxScheduler.enqueue(params + sizeof(txOverride), ax25Len, &txOverride)) {
           _LOGW("AX.25 TX queue full; dropped frequency-override job");
         }
@@ -495,7 +495,7 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
 }
 
 void handleAx25Data(uint8_t *ax25, size_t ax25_len) {
-  if (ax25_len > 0 && ax25_len <= PROTO_MTU && txAllowedByHost()) {
+  if (ax25_len > 0 && ax25_len <= AX25_MAX_KISS_DATA_LEN && txAllowedByHost()) {
     if (!ax25TxScheduler.enqueue(ax25, ax25_len)) {
       _LOGW("AX.25 TX queue full; dropped KISS DATA frame");
     }
