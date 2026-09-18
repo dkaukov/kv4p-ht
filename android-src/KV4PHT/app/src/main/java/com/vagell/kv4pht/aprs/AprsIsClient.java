@@ -331,33 +331,42 @@ public final class AprsIsClient implements AutoCloseable {
                               ConnectionConfiguration configuration) throws IOException {
         boolean receivingLogged = false;
         while (isCurrent(configuration)) {
-            PendingPacket pending;
-            synchronized (lock) {
-                pending = pendingPackets.peekFirst();
-            }
-            if (pending != null) {
-                if (!isCurrentTransmitSession(configuration)) return;
-                writeLine(writer, pending.packet);
-                if (removeDeliveredPacket(configuration, pending)) {
-                    runSuccessCallback(pending.onSuccess);
-                }
-                continue;
-            }
-            try {
-                String line = reader.readLine();
-                if (line == null) throw new IOException("APRS-IS connection closed");
-                if (configuration.receiveEnabled && !line.startsWith("#")
-                        && isValidPacket(line)) {
-                    deliverIncomingPacket(line);
-                    if (!receivingLogged) {
-                        logInfo("Receiving APRS-IS packets");
-                        receivingLogged = true;
-                    }
-                }
-            } catch (SocketTimeoutException ignored) {
-                // Poll configuration and the outgoing queue again.
-            }
+            if (transmitPendingPacket(writer, configuration)) continue;
+            receivingLogged = receiveIncomingPacket(reader, configuration, receivingLogged);
         }
+    }
+
+    /** Returns true when a queued packet was handled, including an aborted transmission. */
+    private boolean transmitPendingPacket(BufferedWriter writer,
+                                          ConnectionConfiguration configuration) throws IOException {
+        PendingPacket pending;
+        synchronized (lock) {
+            pending = pendingPackets.peekFirst();
+        }
+        if (pending == null) return false;
+        if (!isCurrentTransmitSession(configuration)) return true;
+        writeLine(writer, pending.packet);
+        if (removeDeliveredPacket(configuration, pending)) {
+            runSuccessCallback(pending.onSuccess);
+        }
+        return true;
+    }
+
+    private boolean receiveIncomingPacket(BufferedReader reader,
+                                          ConnectionConfiguration configuration,
+                                          boolean receivingLogged) throws IOException {
+        try {
+            String line = reader.readLine();
+            if (line == null) throw new IOException("APRS-IS connection closed");
+            if (configuration.receiveEnabled && !line.startsWith("#") && isValidPacket(line)) {
+                deliverIncomingPacket(line);
+                if (!receivingLogged) logInfo("Receiving APRS-IS packets");
+                return true;
+            }
+        } catch (SocketTimeoutException ignored) {
+            // Poll configuration and the outgoing queue again.
+        }
+        return receivingLogged;
     }
 
     private boolean isCurrent(ConnectionConfiguration configuration) {
