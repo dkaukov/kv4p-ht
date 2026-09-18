@@ -18,8 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 package com.vagell.kv4pht.data.migrations;
 
+import android.database.Cursor;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
+import com.vagell.kv4pht.aprs.parser.StationCapabilitiesField;
 
 /** Splits legacy APRS events from the physical packet history introduced in version 8. */
 public class MigrationFrom7To8 extends Migration {
@@ -30,6 +32,7 @@ public class MigrationFrom7To8 extends Migration {
     @Override
     public void migrate(SupportSQLiteDatabase database) {
         database.execSQL("ALTER TABLE aprs_messages RENAME TO legacy_aprs_messages");
+        normalizeLegacyCapabilityRows(database);
         database.execSQL("DROP TABLE IF EXISTS aprs_packets");
         database.execSQL("CREATE TABLE IF NOT EXISTS aprs_packets ("
             + "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, event_id INTEGER, "
@@ -75,7 +78,8 @@ public class MigrationFrom7To8 extends Migration {
             + "position_lat, position_long, comment, object_name, temperature, humidity, pressure, "
             + "rain, snow, wind_force, wind_direction, relay_callsign, delivery_state, "
             + "transmit_attempts, next_retry_at_ms) SELECT id, "
-            + "CASE WHEN type = 0 AND comment LIKE 'Raw: >%' THEN 5 ELSE type END, "
+            + "CASE WHEN type = 0 AND comment LIKE 'Raw: >%' THEN 5 "
+            + "WHEN type = 0 AND comment LIKE 'Raw: <%' THEN 6 ELSE type END, "
             + "timestamp * 1000, "
             + "timestamp * 1000, 0, NULL, from_callsign, to_callsign, "
             + "CASE WHEN message_num >= 0 THEN CAST(message_num AS TEXT) ELSE NULL END, msg_body, "
@@ -125,5 +129,20 @@ public class MigrationFrom7To8 extends Migration {
             + "ORDER BY newest.sort_time_ms DESC, newest.event_id DESC LIMIT 1)");
         database.execSQL("DROP TABLE aprs_feed_candidates");
         database.execSQL("DROP TABLE legacy_aprs_messages");
+    }
+
+    /** Converts legacy raw capability rows before copying them into the v8 event/feed model. */
+    private void normalizeLegacyCapabilityRows(SupportSQLiteDatabase database) {
+        try (Cursor cursor = database.query("SELECT id, comment FROM legacy_aprs_messages "
+                + "WHERE type = 0 AND comment LIKE 'Raw: <%'")) {
+            while (cursor.moveToNext()) {
+                long id = cursor.getLong(0);
+                String comment = cursor.getString(1);
+                String capabilityText = comment == null ? "" : comment.substring("Raw: <".length());
+                database.execSQL("UPDATE legacy_aprs_messages SET type = 6, comment = ? "
+                        + "WHERE id = ?", new Object[] {
+                            StationCapabilitiesField.formatDisplayText(capabilityText), id});
+            }
+        }
     }
 }

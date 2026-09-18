@@ -106,6 +106,13 @@ public final class StationCapabilitiesField extends APRSData {
         return displayText;
     }
 
+    /** Formats legacy capability text that does not include the APRS {@code <} data type. */
+    public static String formatDisplayText(String capabilityText) {
+        byte[] bytes = ("<" + (capabilityText == null ? "" : capabilityText))
+            .getBytes(StandardCharsets.ISO_8859_1);
+        return new StationCapabilitiesField(bytes).getDisplayText();
+    }
+
     @Override public String toString() {
         return displayText;
     }

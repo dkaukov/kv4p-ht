@@ -66,6 +66,8 @@ public final class AprsIsClient implements AutoCloseable {
     private Double filterLongitude;
     private boolean closed;
     private long configurationGeneration;
+    /** Incremented only when queued packet content changes, never merely because a retry fails. */
+    private long pendingPacketGeneration;
     private Socket activeSocket;
 
     public AprsIsClient(String softwareVersion) {
@@ -94,7 +96,7 @@ public final class AprsIsClient implements AutoCloseable {
             if (this.enabled == enabled) return;
             this.enabled = enabled;
             configurationGeneration++;
-            if (!enabled) pendingPackets.clear();
+            if (!enabled) clearPendingPacketsLocked();
             disconnectLocked();
             lock.notifyAll();
         }
@@ -117,6 +119,7 @@ public final class AprsIsClient implements AutoCloseable {
             if (transmitEnabled == enabled) return;
             transmitEnabled = enabled;
             configurationGeneration++;
+            if (!enabled) clearPendingPacketsLocked();
             disconnectLocked();
             lock.notifyAll();
         }
@@ -158,6 +161,7 @@ public final class AprsIsClient implements AutoCloseable {
             if (normalized.equals(callsign)) return;
             callsign = normalized;
             configurationGeneration++;
+            clearPendingPacketsLocked();
             disconnectLocked();
             lock.notifyAll();
         }
@@ -177,9 +181,11 @@ public final class AprsIsClient implements AutoCloseable {
             if (!normalized.equals(callsign)) {
                 callsign = normalized;
                 configurationGeneration++;
+                clearPendingPacketsLocked();
                 disconnectLocked();
             }
             pendingPackets.addLast(new PendingPacket(packet, onSuccess));
+            pendingPacketGeneration++;
             lock.notifyAll();
             return true;
         }
@@ -218,6 +224,7 @@ public final class AprsIsClient implements AutoCloseable {
         while (true) {
             ConnectionConfiguration configuration = awaitConfiguration();
             if (configuration == null) return;
+            long queuedAtSessionStart = pendingPacketGeneration();
             boolean loggedIn = runSession(configuration);
             if (loggedIn) {
                 reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
@@ -226,7 +233,8 @@ public final class AprsIsClient implements AutoCloseable {
             if (!loggedIn) {
                 logInfo("Reconnecting to APRS-IS in " + reconnectDelay + " ms");
             }
-            if (!awaitReconnect(reconnectDelay, configuration.generation)) return;
+            if (!awaitReconnect(reconnectDelay, configuration.generation,
+                    queuedAtSessionStart)) return;
             if (!loggedIn) {
                 reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
             }
@@ -325,11 +333,14 @@ public final class AprsIsClient implements AutoCloseable {
         while (isCurrent(configuration)) {
             PendingPacket pending;
             synchronized (lock) {
-                pending = pendingPackets.pollFirst();
+                pending = pendingPackets.peekFirst();
             }
             if (pending != null) {
+                if (!isCurrentTransmitSession(configuration)) return;
                 writeLine(writer, pending.packet);
-                runSuccessCallback(pending.onSuccess);
+                if (removeDeliveredPacket(configuration, pending)) {
+                    runSuccessCallback(pending.onSuccess);
+                }
                 continue;
             }
             try {
@@ -356,11 +367,36 @@ public final class AprsIsClient implements AutoCloseable {
         }
     }
 
-    private boolean awaitReconnect(long delayMs, long sessionGeneration) {
+    private boolean isCurrentTransmitSession(ConnectionConfiguration configuration) {
+        synchronized (lock) {
+            return isCurrent(configuration) && transmitEnabled;
+        }
+    }
+
+    private boolean removeDeliveredPacket(ConnectionConfiguration configuration,
+                                          PendingPacket delivered) {
+        synchronized (lock) {
+            if (!isCurrentTransmitSession(configuration) || pendingPackets.peekFirst() != delivered) {
+                return false;
+            }
+            pendingPackets.removeFirst();
+            pendingPacketGeneration++;
+            return true;
+        }
+    }
+
+    private long pendingPacketGeneration() {
+        synchronized (lock) {
+            return pendingPacketGeneration;
+        }
+    }
+
+    private boolean awaitReconnect(long delayMs, long sessionGeneration,
+                                   long queuedPacketGeneration) {
         synchronized (lock) {
             long deadlineMs = System.currentTimeMillis() + delayMs;
             while (!closed && configurationGeneration == sessionGeneration
-                    && pendingPackets.isEmpty()) {
+                    && pendingPacketGeneration == queuedPacketGeneration) {
                 long remainingMs = deadlineMs - System.currentTimeMillis();
                 if (remainingMs <= 0) break;
                 try {
@@ -382,6 +418,12 @@ public final class AprsIsClient implements AutoCloseable {
 
     private void disconnectLocked() {
         if (activeSocket != null) closeQuietly(activeSocket);
+    }
+
+    private void clearPendingPacketsLocked() {
+        if (pendingPackets.isEmpty()) return;
+        pendingPackets.clear();
+        pendingPacketGeneration++;
     }
 
     private static void runSuccessCallback(Runnable callback) {
@@ -523,7 +565,7 @@ public final class AprsIsClient implements AutoCloseable {
         synchronized (lock) {
             closed = true;
             enabled = false;
-            pendingPackets.clear();
+            clearPendingPacketsLocked();
             disconnectLocked();
             lock.notifyAll();
         }

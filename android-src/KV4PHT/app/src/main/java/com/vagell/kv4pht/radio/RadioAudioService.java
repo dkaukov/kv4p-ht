@@ -376,21 +376,13 @@ public class RadioAudioService extends Service {
                 != ConnectionResult.SUCCESS) return;
         FusedLocationProviderClient locationClient =
             LocationServices.getFusedLocationProviderClient(this);
-        locationClient.getLastLocation().addOnSuccessListener(location -> {
-            if (!aprsIsDisplayEnabled) return;
-            if (location != null) {
-                updateAprsIsFilterLocation(location.getLatitude(), location.getLongitude());
-                return;
-            }
-            CancellationToken token = new CancellationTokenSource().getToken();
-            locationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token)
-                .addOnSuccessListener(current -> {
-                    if (aprsIsDisplayEnabled && current != null) {
-                        updateAprsIsFilterLocation(
-                            current.getLatitude(), current.getLongitude());
-                    }
-                });
-        });
+        CancellationToken token = new CancellationTokenSource().getToken();
+        locationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token)
+            .addOnSuccessListener(location -> {
+                if (aprsIsDisplayEnabled && location != null) {
+                    updateAprsIsFilterLocation(location.getLatitude(), location.getLongitude());
+                }
+            });
     }
 
     private void updateAprsIsFilterLocation(double latitude, double longitude) {
