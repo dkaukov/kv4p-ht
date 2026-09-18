@@ -20,23 +20,31 @@ package com.vagell.kv4pht.data;
 
 import androidx.room.Dao;
 import androidx.room.Insert;
+import androidx.room.OnConflictStrategy;
 import androidx.room.Query;
+import androidx.room.Transaction;
 import androidx.room.Update;
 import java.util.List;
 
 @Dao
 public interface AprsEventDao {
-    @Query("SELECT * FROM (SELECT * FROM aprs_events WHERE first_seen_ms >= :sinceMs "
-        + "ORDER BY first_seen_ms DESC, id DESC LIMIT :limit) ORDER BY first_seen_ms, id")
-    List<AprsEvent> getSince(long sinceMs, int limit);
+    @Query("SELECT * FROM (SELECT f.feed_key, f.sort_time_ms, f.event_count, e.* "
+        + "FROM aprs_feed f INNER JOIN aprs_events e ON e.id = f.event_id "
+        + "WHERE f.sort_time_ms >= :sinceMs "
+        + "ORDER BY f.sort_time_ms DESC, e.id DESC LIMIT :limit) "
+        + "ORDER BY sort_time_ms, id")
+    List<AprsFeedRow> getFeedSince(long sinceMs, int limit);
 
-    @Query("SELECT * FROM (SELECT * FROM aprs_events "
-        + "WHERE first_seen_ms >= :sinceMs AND (type != :messageType "
-        + "OR from_callsign = :localCallsign OR to_callsign = :localCallsign "
-        + "OR to_callsign IN ('ALL', 'QST', 'CQ') "
-        + "OR (to_callsign >= 'BLN' AND to_callsign < 'BLO')) "
-        + "ORDER BY first_seen_ms DESC, id DESC LIMIT :limit) ORDER BY first_seen_ms, id")
-    List<AprsEvent> getMineSince(long sinceMs, int messageType, String localCallsign, int limit);
+    @Query("SELECT * FROM (SELECT f.feed_key, f.sort_time_ms, f.event_count, e.* "
+        + "FROM aprs_feed f INNER JOIN aprs_events e ON e.id = f.event_id "
+        + "WHERE f.sort_time_ms >= :sinceMs AND (e.type != :messageType "
+        + "OR e.from_callsign = :localCallsign OR e.to_callsign = :localCallsign "
+        + "OR e.to_callsign IN ('ALL', 'QST', 'CQ') "
+        + "OR (e.to_callsign >= 'BLN' AND e.to_callsign < 'BLO')) "
+        + "ORDER BY f.sort_time_ms DESC, e.id DESC LIMIT :limit) "
+        + "ORDER BY sort_time_ms, id")
+    List<AprsFeedRow> getMineFeedSince(long sinceMs, int messageType, String localCallsign,
+                                        int limit);
 
     @Query("SELECT * FROM aprs_events WHERE delivery_state = :pendingState "
         + "AND next_retry_at_ms IS NOT NULL AND next_retry_at_ms <= :now")
@@ -61,6 +69,24 @@ public interface AprsEventDao {
 
     @Insert
     long insert(AprsEvent event);
+
+    @Query("SELECT * FROM aprs_feed WHERE feed_key = :feedKey LIMIT 1")
+    AprsFeedItem getFeedItem(String feedKey);
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void upsertFeedItem(AprsFeedItem item);
+
+    /** Inserts an immutable event and atomically advances its materialized feed slot. */
+    @Transaction
+    default long insertWithFeed(AprsEvent event, String feedKey) {
+        long eventId = insert(event);
+        String resolvedKey = feedKey == null ? "event:" + eventId : feedKey;
+        AprsFeedItem current = getFeedItem(resolvedKey);
+        int eventCount = current == null ? 1 : current.eventCount + 1;
+        upsertFeedItem(new AprsFeedItem(
+            resolvedKey, eventId, event.firstSeenMs, eventCount));
+        return eventId;
+    }
 
     @Update
     void update(AprsEvent event);

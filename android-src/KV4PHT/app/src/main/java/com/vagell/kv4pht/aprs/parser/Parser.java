@@ -25,9 +25,8 @@
 
 package com.vagell.kv4pht.aprs.parser;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
+
 /**
  * 
  * @author johng
@@ -201,19 +200,18 @@ public class Parser {
     				//System.out.println("Parsing an OBJECT");
 					ObjectField of = new ObjectField(msgBody);
     				infoField.addAprsData(APRSTypes.T_OBJECT, of);
-					cursor = of.getLastCursorPosition();
-					byte[] slice = Arrays.copyOfRange(msgBody, cursor, msgBody.length-1);
-					packet.setComment(new String(slice, StandardCharsets.UTF_8));
+					packet.setComment(of.getComment());
     			} else {
     				System.err.println("Object packet body too short for valid object");
     				packet.setHasFault(true); // too short for an object
     			}
     			break;
-    		case '>':
-//				packet.setType(APRSTypes.T_STATUS);
-    			break;
+		case '>':
+				infoField.addAprsData(APRSTypes.T_STATUS, new StatusField(msgBody));
+			break;
     		case '<':
-//				packet.setType(APRSTypes.T_STATCAPA);
+				infoField.addAprsData(APRSTypes.T_STATCAPA,
+					new StationCapabilitiesField(msgBody));
     			break;
     		case '?':
 //				packet.setType(APRSTypes.T_QUERY);

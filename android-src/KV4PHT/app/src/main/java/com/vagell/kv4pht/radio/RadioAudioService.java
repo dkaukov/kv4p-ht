@@ -61,8 +61,10 @@ import com.google.android.gms.tasks.CancellationTokenSource;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
+import com.vagell.kv4pht.BuildConfig;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.aprs.AprsController;
+import com.vagell.kv4pht.aprs.AprsIsClient;
 import com.vagell.kv4pht.aprs.parser.APRSIconType;
 import com.vagell.kv4pht.aprs.parser.APRSPacket;
 import com.vagell.kv4pht.aprs.parser.APRSTypes;
@@ -73,6 +75,7 @@ import com.vagell.kv4pht.aprs.parser.Position;
 import com.vagell.kv4pht.aprs.parser.PositionField;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.data.AprsEvent;
+import com.vagell.kv4pht.data.AprsFeedRow;
 import com.vagell.kv4pht.data.AprsSource;
 import com.vagell.kv4pht.data.AppDatabase;
 import com.vagell.kv4pht.firmware.FirmwareUtils;
@@ -207,6 +210,9 @@ public class RadioAudioService extends Service {
     private int aprsPositionAccuracy = APRS_POSITION_EXACT;
     private int messageNumber = 0;
     private final SecureRandom messageNumberRandom = new SecureRandom();
+    private AprsIsClient aprsIsClient;
+    private boolean aprsIgateEnabled;
+    private boolean aprsIsDisplayEnabled;
 
     // === Protocol Handshake ===
     private static final int HELLO_TIMEOUT_MS = 60000;
@@ -218,7 +224,6 @@ public class RadioAudioService extends Service {
     // === Radio State ===
     @Getter
     private @NonNull RadioMode mode = RadioMode.STARTUP;
-    @Setter
     private @NonNull String callsign = "";
     @Getter
     private @NonNull String activeFrequencyStr = "";
@@ -294,7 +299,7 @@ public class RadioAudioService extends Service {
         }
 
         // Retrieve necessary parameters from the intent.
-        callsign = Optional.ofNullable(bundle.getString("callsign")).orElse("");
+        setCallsign(Optional.ofNullable(bundle.getString("callsign")).orElse(""));
         if (bundle.containsKey("squelch")) {
             radioModule.seedDesiredSquelch(bundle.getInt("squelch"));
         }
@@ -317,6 +322,82 @@ public class RadioAudioService extends Service {
 
     public void setDigipeatPackets(boolean enabled) {
         aprsController.setDigipeatingEnabled(enabled);
+    }
+
+    public void setAprsIgateEnabled(boolean enabled) {
+        aprsIgateEnabled = enabled;
+        aprsController.setIgateEnabled(enabled);
+        updateAprsIsConnection();
+    }
+
+    public void setAprsIsDisplayEnabled(boolean enabled) {
+        aprsIsDisplayEnabled = enabled;
+        AprsIsClient client = aprsIsClient;
+        if (client != null) client.setReceiveEnabled(enabled);
+        if (enabled) refreshAprsIsFilterLocation();
+        else if (client != null) client.setFilterLocation(null, null);
+        updateAprsIsConnection();
+    }
+
+    public void setAprsIsServer(String server) {
+        AprsIsClient client = aprsIsClient;
+        if (client != null) client.setServer(server);
+    }
+
+    public void setCallsign(@NonNull String callsign) {
+        this.callsign = callsign;
+        AprsIsClient client = aprsIsClient;
+        if (client != null) client.setCallsign(callsign);
+    }
+
+    private void updateAprsIsConnection() {
+        AprsIsClient client = aprsIsClient;
+        if (client == null) return;
+        client.setCallsign(callsign);
+        boolean active = aprsIgateEnabled || aprsIsDisplayEnabled;
+        if (!active) {
+            client.setEnabled(false);
+            client.setTransmitEnabled(false);
+            return;
+        }
+        client.setTransmitEnabled(aprsIgateEnabled);
+        client.setEnabled(true);
+    }
+
+    private void refreshAprsIsFilterLocation() {
+        AprsIsClient client = aprsIsClient;
+        if (client == null) return;
+        client.setFilterLocation(null, null);
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) return;
+        if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(getBaseContext())
+                != ConnectionResult.SUCCESS) return;
+        FusedLocationProviderClient locationClient =
+            LocationServices.getFusedLocationProviderClient(this);
+        locationClient.getLastLocation().addOnSuccessListener(location -> {
+            if (!aprsIsDisplayEnabled) return;
+            if (location != null) {
+                updateAprsIsFilterLocation(location.getLatitude(), location.getLongitude());
+                return;
+            }
+            CancellationToken token = new CancellationTokenSource().getToken();
+            locationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token)
+                .addOnSuccessListener(current -> {
+                    if (aprsIsDisplayEnabled && current != null) {
+                        updateAprsIsFilterLocation(
+                            current.getLatitude(), current.getLongitude());
+                    }
+                });
+        });
+    }
+
+    private void updateAprsIsFilterLocation(double latitude, double longitude) {
+        AprsIsClient client = aprsIsClient;
+        if (client != null && aprsIsDisplayEnabled) {
+            client.setFilterLocation(latitude, longitude);
+        }
     }
 
     public void setAprsHistoryWindow(String historyWindow) {
@@ -383,14 +464,16 @@ public class RadioAudioService extends Service {
         }
     }
 
-    public LiveData<List<AprsEvent>> getAprsEvents() {
-        return aprsController.getEvents();
+    public LiveData<List<AprsFeedRow>> getAprsFeed() {
+        return aprsController.getFeed();
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
         aprsExecutor = Executors.newSingleThreadExecutor();
+        aprsIsClient = new AprsIsClient(BuildConfig.VERSION_NAME,
+            packet -> aprsController.handleAprsIsPacket(packet));
         aprsController = createAprsController();
 
         // Keep CPU on while service is running so we can play and process audio
@@ -470,6 +553,12 @@ public class RadioAudioService extends Service {
 
         @Override public AprsController.Transmission transmitDigipeatedPacket(APRSPacket packet) {
             return canTransmitAprs() ? transmitAprsPacket(packet) : null;
+        }
+
+        @Override public boolean gateToAprsIs(String tnc2, Long eventId) {
+            AprsIsClient client = aprsIsClient;
+            return client != null && client.send(callsign, tnc2,
+                () -> aprsController.recordAprsIsTransmission(eventId, tnc2));
         }
 
         private void acquireBeaconWakeLock() {
@@ -656,6 +745,10 @@ public class RadioAudioService extends Service {
         super.onDestroy();
         tryToStopRadioModule();
         connectionController.stop();
+        if (aprsIsClient != null) {
+            aprsIsClient.close();
+            aprsIsClient = null;
+        }
         if (aprsExecutor != null) {
             aprsExecutor.shutdownNow();
         }
@@ -1809,6 +1902,7 @@ public class RadioAudioService extends Service {
         locationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token)
             .addOnSuccessListener(location -> {
                 if (location != null) {
+                    updateAprsIsFilterLocation(location.getLatitude(), location.getLongitude());
                     performPositionBeacon(location.getLatitude(), location.getLongitude());
                 } else {
                     callbacks.unknownLocation();

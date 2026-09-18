@@ -19,8 +19,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package com.vagell.kv4pht.ui;
 
 import android.content.Intent;
+import android.icu.util.LocaleData;
+import android.icu.util.ULocale;
 import android.icu.text.SimpleDateFormat;
 import android.net.Uri;
+import android.os.Build;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,10 +32,12 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import androidx.core.text.util.LocalePreferences;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.data.AprsEvent;
+import com.vagell.kv4pht.data.AprsFeedRow;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -40,7 +45,7 @@ import java.util.List;
 import java.util.Locale;
 
 public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder> {
-    public List<AprsEvent> aprsEvents;
+    public List<AprsFeedRow> aprsFeed;
 
     static DeliveryStatusStyle deliveryStatusStyle(int deliveryState) {
         switch (deliveryState) {
@@ -62,6 +67,55 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         }
     }
 
+    static boolean showCommentInFeed(int eventType) {
+        return eventType != AprsEvent.POSITION_TYPE;
+    }
+
+    static boolean showObjectSource(String source, String objectName) {
+        String normalizedSource = trimmed(source);
+        return !normalizedSource.isEmpty()
+            && !normalizedSource.equalsIgnoreCase(trimmed(objectName));
+    }
+
+    static String mapLabel(AprsEvent event) {
+        if (event.type == AprsEvent.OBJECT_TYPE) {
+            return AprsObjectSummary.from(event.objectName, event.comment).mapLabel;
+        }
+        String name = trimmed(event.fromCallsign);
+        String description = trimmed(event.comment);
+        if (name.isEmpty()) return description;
+        if (description.isEmpty()) return name;
+        return name + ": " + description;
+    }
+
+    private static String trimmed(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    static double fahrenheitToCelsius(double fahrenheit) {
+        return (fahrenheit - 32.0) * 5.0 / 9.0;
+    }
+
+    static double fahrenheitToKelvin(double fahrenheit) {
+        return fahrenheitToCelsius(fahrenheit) + 273.15;
+    }
+
+    static double milesPerHourToKilometresPerHour(double milesPerHour) {
+        return milesPerHour * 1.609344;
+    }
+
+    static boolean usesMilesPerHour(Locale locale) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            LocaleData.MeasurementSystem system = LocaleData.getMeasurementSystem(
+                ULocale.forLocale(locale));
+            return system == LocaleData.MeasurementSystem.US
+                || system == LocaleData.MeasurementSystem.UK;
+        }
+        String country = locale.getCountry();
+        return "US".equals(country) || "GB".equals(country)
+            || "LR".equals(country) || "MM".equals(country);
+    }
+
     static final class DeliveryStatusStyle {
         final int drawable;
         final int description;
@@ -75,7 +129,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
     }
 
     public APRSAdapter() {
-        this.aprsEvents = new ArrayList<>();
+        this.aprsFeed = new ArrayList<>();
     }
 
     @NonNull
@@ -96,6 +150,10 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             case AprsEvent.WEATHER_TYPE:
                 itemView = LayoutInflater.from(parent.getContext()).inflate(R.layout.aprs_weather, parent, false);
                 break;
+            case AprsEvent.STATUS_TYPE:
+            case AprsEvent.STATION_CAPABILITIES_TYPE:
+                itemView = LayoutInflater.from(parent.getContext()).inflate(R.layout.aprs_status, parent, false);
+                break;
             case AprsEvent.UNKNOWN_TYPE:
             default:
                 itemView = LayoutInflater.from(parent.getContext()).inflate(R.layout.aprs_unknown, parent, false);
@@ -104,26 +162,27 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         return new APRSViewHolder(itemView);
     }
 
-    public void setAprsEvents(List<AprsEvent> aprsEvents) {
-        this.aprsEvents = aprsEvents;
+    public void setAprsFeed(List<AprsFeedRow> aprsFeed) {
+        this.aprsFeed = aprsFeed;
     }
 
     @Override
     public int getItemViewType(int position) {
-        return aprsEvents.get(position).type;
+        return aprsFeed.get(position).event.type;
     }
 
     @Override
     public void onBindViewHolder(@NonNull APRSViewHolder holder, int position) {
-        final AprsEvent aprsEvent = aprsEvents.get(position);
+        final AprsEvent aprsEvent = aprsFeed.get(position).event;
 
         // Some default values any message type can have
         holder.setFromCallsign(aprsEvent.fromCallsign);
         holder.setTimestamp(aprsEvent.firstSeenMs);
-        holder.setComment(aprsEvent.comment);
+        holder.setComment(showCommentInFeed(aprsEvent.type) ? aprsEvent.comment : null);
         holder.setPositionLat(aprsEvent.positionLat);
         holder.setPositionLong(aprsEvent.positionLong);
         holder.setDigipeated(aprsEvent.digipeated);
+        holder.setInternetOnly(aprsEvent.internetOnly);
 
         // Specialized values
         switch (aprsEvent.type) {
@@ -143,8 +202,13 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
                 break;
             case AprsEvent.OBJECT_TYPE:
                 holder.setObjName(aprsEvent.objectName);
+                holder.setComment(AprsObjectSummary.from(
+                    aprsEvent.objectName, aprsEvent.comment).cardText);
+                holder.setObjectSource(aprsEvent.fromCallsign, aprsEvent.objectName);
                 break;
             case AprsEvent.POSITION_TYPE: // Can only have default values
+            case AprsEvent.STATUS_TYPE: // Ditto
+            case AprsEvent.STATION_CAPABILITIES_TYPE: // Ditto
             case AprsEvent.UNKNOWN_TYPE: // Ditto
                 break;
             default:
@@ -155,8 +219,10 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         // Handle taps on the message's position icon
         final View positionButton = holder.itemView.findViewById(R.id.senderPositionButton);
         positionButton.setOnClickListener(v -> {
-            String geoUri = "geo:" + aprsEvent.positionLat + "," + aprsEvent.positionLong
-                + "?q=" + aprsEvent.positionLat + "," + aprsEvent.positionLong;
+            String coordinates = aprsEvent.positionLat + "," + aprsEvent.positionLong;
+            String label = mapLabel(aprsEvent);
+            String mapQuery = label.isEmpty() ? coordinates : coordinates + " (" + label + ")";
+            String geoUri = "geo:" + coordinates + "?q=" + Uri.encode(mapQuery);
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(geoUri));
             v.getContext().startActivity(intent);
         });
@@ -164,7 +230,7 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
 
     @Override
     public int getItemCount() {
-        return aprsEvents.size();
+        return aprsFeed.size();
     }
 
     static class APRSViewHolder extends RecyclerView.ViewHolder {
@@ -173,19 +239,23 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         TextView textViewComment;
         View senderPositionButton;
         TextView textViewTemperature;
+        TextView textViewTemperatureUnit;
         TextView textViewHumidity;
         TextView textViewPressure;
         TextView textViewRain;
         TextView textViewSnow;
         TextView textViewWindForce;
+        TextView textViewWindUnit;
         TextView textViewWindDir;
         TextView textViewToCallsign;
         TextView textViewMsgBody;
         ImageView deliveryStatusIcon;
         TextView textViewObjName;
+        View objectSourceHolder;
         TextView textViewRelayCallsign;
         TextView textViewRelayViaLabel;
         TextView textViewDigipeated;
+        TextView textViewInternet;
 
         public APRSViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -197,19 +267,23 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             textViewComment = itemView.findViewById(R.id.comment);
             senderPositionButton = itemView.findViewById(R.id.senderPositionButton);
             textViewTemperature = itemView.findViewById(R.id.temperature);
+            textViewTemperatureUnit = itemView.findViewById(R.id.temperatureUnit);
             textViewHumidity = itemView.findViewById(R.id.humidity);
             textViewPressure = itemView.findViewById(R.id.pressure);
             textViewRain = itemView.findViewById(R.id.rain);
             textViewSnow = itemView.findViewById(R.id.snow);
             textViewWindForce = itemView.findViewById(R.id.wind);
+            textViewWindUnit = itemView.findViewById(R.id.windUnit);
             textViewWindDir = itemView.findViewById(R.id.windDirection);
             textViewToCallsign = itemView.findViewById(R.id.toCallsign);
             textViewMsgBody = itemView.findViewById(R.id.messageBody);
             deliveryStatusIcon = itemView.findViewById(R.id.messageDeliveryStatus);
             textViewObjName = itemView.findViewById(R.id.objName);
+            objectSourceHolder = itemView.findViewById(R.id.objectSourceHolder);
             textViewRelayCallsign = itemView.findViewById(R.id.relayCallsign);
             textViewRelayViaLabel = itemView.findViewById(R.id.relayViaLabel);
             textViewDigipeated = itemView.findViewById(R.id.digipeatedIndicator);
+            textViewInternet = itemView.findViewById(R.id.internetIndicator);
         }
 
         public void setFromCallsign(String fromCallsign) {
@@ -258,7 +332,19 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             if (null == textViewTemperature) {
                 return;
             }
-            textViewTemperature.setText(String.format(Locale.US, "%.1f", temperature));
+            Locale locale = displayLocale();
+            String temperatureUnit = LocalePreferences.getTemperatureUnit(locale);
+            double displayTemperature = temperature;
+            String unit = "°F";
+            if (LocalePreferences.TemperatureUnit.CELSIUS.equals(temperatureUnit)) {
+                displayTemperature = fahrenheitToCelsius(temperature);
+                unit = "°C";
+            } else if (LocalePreferences.TemperatureUnit.KELVIN.equals(temperatureUnit)) {
+                displayTemperature = fahrenheitToKelvin(temperature);
+                unit = "K";
+            }
+            textViewTemperature.setText(String.format(locale, "%.1f", displayTemperature));
+            if (textViewTemperatureUnit != null) textViewTemperatureUnit.setText(unit);
         }
 
         public void setHumidity(double humidity) {
@@ -293,7 +379,21 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             if (null == textViewWindForce) {
                 return;
             }
-            textViewWindForce.setText("" + windForce);
+            Locale locale = displayLocale();
+            boolean useMilesPerHour = usesMilesPerHour(locale);
+            double displaySpeed = useMilesPerHour ? windForce
+                : milesPerHourToKilometresPerHour(windForce);
+            textViewWindForce.setText(String.format(locale, "%.0f", displaySpeed));
+            if (textViewWindUnit != null) {
+                textViewWindUnit.setText(useMilesPerHour ? "mph" : "km/h");
+            }
+        }
+
+        private Locale displayLocale() {
+            if (!itemView.getResources().getConfiguration().getLocales().isEmpty()) {
+                return itemView.getResources().getConfiguration().getLocales().get(0);
+            }
+            return Locale.getDefault();
         }
 
         public void setWindDir(String windDir) {
@@ -340,6 +440,12 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
             textViewObjName.setText(objName);
         }
 
+        public void setObjectSource(String source, String objectName) {
+            if (objectSourceHolder == null) return;
+            objectSourceHolder.setVisibility(showObjectSource(source, objectName)
+                ? View.VISIBLE : View.GONE);
+        }
+
         public void setRelayCallsign(String relayCallsign) {
             // Relay callsigns are intentionally not displayed: they make the status line hard to read.
         }
@@ -347,6 +453,12 @@ public class APRSAdapter extends RecyclerView.Adapter<APRSAdapter.APRSViewHolder
         public void setDigipeated(boolean digipeated) {
             if (textViewDigipeated != null) {
                 textViewDigipeated.setVisibility(digipeated ? View.VISIBLE : View.GONE);
+            }
+        }
+
+        public void setInternetOnly(boolean internetOnly) {
+            if (textViewInternet != null) {
+                textViewInternet.setVisibility(internetOnly ? View.VISIBLE : View.GONE);
             }
         }
     }

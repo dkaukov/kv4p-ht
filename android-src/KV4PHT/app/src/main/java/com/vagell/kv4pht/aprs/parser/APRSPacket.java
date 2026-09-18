@@ -41,7 +41,8 @@ import java.util.stream.IntStream;
  */
 public class APRSPacket implements Serializable {
 
-	public static final Set<String> Q_CONSTRUCTS = Set.of("qar", "qas", "qac", "qao");
+	public static final Set<String> Q_CONSTRUCTS = Set.of(
+        "qac", "qax", "qau", "qao", "qas", "qar", "qaz", "qai");
 	private static final long serialVersionUID = 1L;
     public static final String KV4P_HT_VENDOR_TOCALL = "APKVPA";
 
@@ -200,4 +201,3 @@ public class APRSPacket implements Serializable {
 		return byteArrayOutputStream.toByteArray();
 	}
 }
-

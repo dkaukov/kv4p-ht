@@ -19,7 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package com.vagell.kv4pht.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.data.AprsEvent;
@@ -36,6 +38,35 @@ public class APRSAdapterTest {
         assertStyle(AprsEvent.DELIVERY_FAILED, R.drawable.ic_failed,
             R.string.aprs_delivery_failed);
         assertNull(APRSAdapter.deliveryStatusStyle(AprsEvent.DELIVERY_NONE));
+    }
+
+    @Test public void positionDescriptionsStayOnMapWhileObjectsUseCards() {
+        AprsEvent position = new AprsEvent();
+        position.type = AprsEvent.POSITION_TYPE;
+        position.fromCallsign = "VK3ABC-7";
+        position.comment = "Listening on 146.52";
+
+        AprsEvent object = new AprsEvent();
+        object.type = AprsEvent.OBJECT_TYPE;
+        object.objectName = "VK3RPT B";
+        object.comment = "439.150 MHz repeater";
+
+        assertFalse(APRSAdapter.showCommentInFeed(position.type));
+        assertTrue(APRSAdapter.showCommentInFeed(object.type));
+        assertTrue(APRSAdapter.showCommentInFeed(AprsEvent.STATUS_TYPE));
+        assertTrue(APRSAdapter.showCommentInFeed(AprsEvent.STATION_CAPABILITIES_TYPE));
+        assertTrue(APRSAdapter.showCommentInFeed(AprsEvent.UNKNOWN_TYPE));
+        assertEquals("VK3ABC-7: Listening on 146.52", APRSAdapter.mapLabel(position));
+        assertEquals("VK3RPT B · 439.15 MHz", APRSAdapter.mapLabel(object));
+        assertFalse(APRSAdapter.showObjectSource("VK3RPT B", "VK3RPT B"));
+        assertTrue(APRSAdapter.showObjectSource("VK3RPT-S", "VK3RPT B"));
+    }
+
+    @Test public void convertsAprsWeatherUnitsForMetricLocales() {
+        assertEquals(20.0, APRSAdapter.fahrenheitToCelsius(68.0), 0.00001);
+        assertEquals(293.15, APRSAdapter.fahrenheitToKelvin(68.0), 0.00001);
+        assertEquals(16.09344,
+            APRSAdapter.milesPerHourToKilometresPerHour(10.0), 0.00001);
     }
 
     private void assertStyle(int state, int drawable, int description) {

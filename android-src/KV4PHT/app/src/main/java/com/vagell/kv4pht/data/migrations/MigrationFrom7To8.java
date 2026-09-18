@@ -34,7 +34,7 @@ public class MigrationFrom7To8 extends Migration {
         database.execSQL("CREATE TABLE IF NOT EXISTS aprs_packets ("
             + "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, event_id INTEGER, "
             + "timestamp_ms INTEGER NOT NULL, source TEXT DEFAULT 'UNKNOWN', frequency_hz INTEGER, "
-            + "from_callsign TEXT, ax25_destination TEXT, path TEXT, raw_ax25 BLOB)");
+            + "from_callsign TEXT, ax25_destination TEXT, path TEXT, raw_ax25 BLOB, raw_tnc2 TEXT)");
         database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_packets_event_id "
             + "ON aprs_packets (event_id)");
         database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_packets_timestamp_ms "
@@ -46,7 +46,7 @@ public class MigrationFrom7To8 extends Migration {
             + "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, type INTEGER NOT NULL DEFAULT 0, "
             + "first_seen_ms INTEGER NOT NULL, last_seen_ms INTEGER NOT NULL, "
             + "packet_count INTEGER NOT NULL DEFAULT 0, digipeated INTEGER NOT NULL DEFAULT 0, "
-            + "dedup_key TEXT, from_callsign TEXT, "
+            + "internet_only INTEGER NOT NULL DEFAULT 0, dedup_key TEXT, from_callsign TEXT, "
             + "to_callsign TEXT, message_identifier TEXT, body TEXT, position_lat REAL NOT NULL, "
             + "position_long REAL NOT NULL, comment TEXT, object_name TEXT, temperature REAL NOT NULL, "
             + "humidity REAL NOT NULL, pressure REAL NOT NULL, rain REAL NOT NULL, snow REAL NOT NULL, "
@@ -57,6 +57,8 @@ public class MigrationFrom7To8 extends Migration {
             + "ON aprs_events (dedup_key, last_seen_ms)");
         database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_first_seen_ms "
             + "ON aprs_events (first_seen_ms)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_events_internet_only_first_seen_ms "
+            + "ON aprs_events (internet_only, first_seen_ms)");
         database.execSQL("CREATE INDEX IF NOT EXISTS "
             + "index_aprs_events_type_to_callsign_first_seen_ms "
             + "ON aprs_events (type, to_callsign, first_seen_ms)");
@@ -72,12 +74,56 @@ public class MigrationFrom7To8 extends Migration {
             + "packet_count, dedup_key, from_callsign, to_callsign, message_identifier, body, "
             + "position_lat, position_long, comment, object_name, temperature, humidity, pressure, "
             + "rain, snow, wind_force, wind_direction, relay_callsign, delivery_state, "
-            + "transmit_attempts, next_retry_at_ms) SELECT id, type, timestamp * 1000, "
+            + "transmit_attempts, next_retry_at_ms) SELECT id, "
+            + "CASE WHEN type = 0 AND comment LIKE 'Raw: >%' THEN 5 ELSE type END, "
+            + "timestamp * 1000, "
             + "timestamp * 1000, 0, NULL, from_callsign, to_callsign, "
             + "CASE WHEN message_num >= 0 THEN CAST(message_num AS TEXT) ELSE NULL END, msg_body, "
-            + "position_lat, position_long, comment, obj_name, temperature, humidity, pressure, "
+            + "position_lat, position_long, "
+            + "CASE WHEN type = 0 AND comment "
+            + "GLOB 'Raw: >[0-9][0-9][0-9][0-9][0-9][0-9][zZ]*' "
+            + "THEN SUBSTR(comment, 14) "
+            + "WHEN type = 0 AND comment LIKE 'Raw: >%' THEN SUBSTR(comment, 7) "
+            + "ELSE comment END, obj_name, temperature, humidity, pressure, "
             + "rain, snow, wind_force, wind_dir, relay_callsign, "
             + "CASE WHEN ack != 0 THEN 2 ELSE 0 END, 0, NULL FROM legacy_aprs_messages");
+
+        database.execSQL("CREATE TABLE IF NOT EXISTS aprs_feed ("
+            + "feed_key TEXT NOT NULL, event_id INTEGER NOT NULL, sort_time_ms INTEGER NOT NULL, "
+            + "event_count INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(feed_key), "
+            + "FOREIGN KEY(event_id) REFERENCES aprs_events(id) "
+            + "ON UPDATE NO ACTION ON DELETE CASCADE)");
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_aprs_feed_event_id "
+            + "ON aprs_feed (event_id)");
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_aprs_feed_sort_time_ms "
+            + "ON aprs_feed (sort_time_ms)");
+
+        // Rebuild the materialized feed from retained v7 history. Messages and unknown events
+        // remain individual rows; station positions, weather, status, capabilities, and objects
+        // retain only their newest event while preserving every event in aprs_events.
+        database.execSQL("CREATE TEMP TABLE aprs_feed_candidates AS SELECT id AS event_id, "
+            + "first_seen_ms AS sort_time_ms, CASE "
+            + "WHEN type = 1 THEN 'message:' || id "
+            + "WHEN type = 3 AND TRIM(COALESCE(from_callsign, '')) != '' "
+            + "THEN 'position:' || UPPER(TRIM(from_callsign)) "
+            + "WHEN type = 4 AND TRIM(COALESCE(from_callsign, '')) != '' "
+            + "THEN 'weather:' || UPPER(TRIM(from_callsign)) "
+            + "WHEN type = 5 AND TRIM(COALESCE(from_callsign, '')) != '' "
+            + "THEN 'status:' || UPPER(TRIM(from_callsign)) "
+            + "WHEN type = 6 AND TRIM(COALESCE(from_callsign, '')) != '' "
+            + "THEN 'capabilities:' || UPPER(TRIM(from_callsign)) "
+            + "WHEN type = 2 AND TRIM(COALESCE(from_callsign, '')) != '' "
+            + "AND TRIM(COALESCE(object_name, '')) != '' THEN 'object:' "
+            + "|| UPPER(TRIM(from_callsign)) || ':' || UPPER(TRIM(object_name)) "
+            + "ELSE 'event:' || id END AS feed_key FROM aprs_events");
+        database.execSQL("INSERT INTO aprs_feed (feed_key, event_id, sort_time_ms, event_count) "
+            + "SELECT candidate.feed_key, candidate.event_id, candidate.sort_time_ms, "
+            + "(SELECT COUNT(*) FROM aprs_feed_candidates counted "
+            + "WHERE counted.feed_key = candidate.feed_key) FROM aprs_feed_candidates candidate "
+            + "WHERE candidate.event_id = (SELECT newest.event_id FROM aprs_feed_candidates newest "
+            + "WHERE newest.feed_key = candidate.feed_key "
+            + "ORDER BY newest.sort_time_ms DESC, newest.event_id DESC LIMIT 1)");
+        database.execSQL("DROP TABLE aprs_feed_candidates");
         database.execSQL("DROP TABLE legacy_aprs_messages");
     }
 }

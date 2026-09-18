@@ -32,7 +32,13 @@ import com.vagell.kv4pht.data.migrations.*;
  */
 @Database(
     version = 8,
-    entities = {AppSetting.class, ChannelMemory.class, AprsPacket.class, AprsEvent.class}
+    entities = {
+        AppSetting.class,
+        ChannelMemory.class,
+        AprsPacket.class,
+        AprsEvent.class,
+        AprsFeedItem.class
+    }
 )
 @SuppressWarnings("java:S6548")
 public abstract class AppDatabase extends RoomDatabase {

@@ -43,9 +43,11 @@ import androidx.lifecycle.ViewModelProvider;
 import com.google.android.material.slider.Slider;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 import com.vagell.kv4pht.BuildConfig;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.aprs.AprsController;
+import com.vagell.kv4pht.aprs.AprsIsClient;
 import com.vagell.kv4pht.aprs.parser.APRSIconType;
 import com.vagell.kv4pht.data.AppSetting;
 import com.vagell.kv4pht.radio.RadioAudioService;
@@ -353,6 +355,12 @@ public class SettingsActivity extends AppCompatActivity {
                     destinationFilterLabel(
                         settings.get(AppSetting.SETTING_APRS_DESTINATION_FILTER)), false);
                 setSwitchIfPresent(settings, AppSetting.SETTING_DIGIPEAT_PACKETS, R.id.digipeatPacketsSwitch);
+                setSwitchIfPresent(settings, AppSetting.SETTING_APRS_IGATE, R.id.aprsIgateSwitch);
+                setSwitchIfPresent(settings, AppSetting.SETTING_APRS_IS_DISPLAY,
+                    R.id.aprsIsDisplaySwitch);
+                this.<TextInputEditText>findViewById(R.id.aprsIsServerEditText).setText(
+                    settings.getOrDefault(AppSetting.SETTING_APRS_IS_SERVER,
+                        AprsIsClient.DEFAULT_SERVER));
                 setRadioSettingsFromIntent();
                 setDropdownIfPresent(settings, AppSetting.SETTING_MIN_2_M_TX_FREQ, R.id.min2mFreqTextView, mhz);
                 setDropdownIfPresent(settings, AppSetting.SETTING_MAX_2_M_TX_FREQ, R.id.max2mFreqTextView, mhz);
@@ -467,6 +475,9 @@ public class SettingsActivity extends AppCompatActivity {
         attachSwitch(R.id.aprsPositionSwitch, this::setAprsBeaconPosition);
         attachTextView(R.id.aprsBeaconFreqTextView, this::setAprsBeaconFrequency);
         attachSwitch(R.id.digipeatPacketsSwitch, this::setDigipeatPackets);
+        attachSwitch(R.id.aprsIgateSwitch, this::setAprsIgate);
+        attachSwitch(R.id.aprsIsDisplaySwitch, this::setAprsIsDisplay);
+        attachTextView(R.id.aprsIsServerEditText, this::setAprsIsServer);
     }
 
     private void saveAppSettingAsync(String key, String value) {
@@ -527,6 +538,25 @@ public class SettingsActivity extends AppCompatActivity {
         if (radioAudioService != null) {
             radioAudioService.setAprsDestinationFilter(value);
         }
+    }
+
+    private void setAprsIgate(boolean enabled) {
+        saveAppSettingAsync(AppSetting.SETTING_APRS_IGATE, Boolean.toString(enabled));
+        if (radioAudioService != null) radioAudioService.setAprsIgateEnabled(enabled);
+    }
+
+    private void setAprsIsDisplay(boolean enabled) {
+        saveAppSettingAsync(AppSetting.SETTING_APRS_IS_DISPLAY, Boolean.toString(enabled));
+        if (radioAudioService != null) radioAudioService.setAprsIsDisplayEnabled(enabled);
+    }
+
+    private void setAprsIsServer(String server) {
+        String normalized = AprsIsClient.normalizeServer(server);
+        TextInputLayout layout = findViewById(R.id.aprsIsServerLayout);
+        layout.setError(normalized == null ? getString(R.string.aprs_is_server_invalid) : null);
+        if (normalized == null) return;
+        saveAppSettingAsync(AppSetting.SETTING_APRS_IS_SERVER, normalized);
+        if (radioAudioService != null) radioAudioService.setAprsIsServer(normalized);
     }
 
     private void setMin2mTxFreq(String freq) {

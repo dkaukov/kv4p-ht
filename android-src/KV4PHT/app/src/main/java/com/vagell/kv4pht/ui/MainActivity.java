@@ -75,6 +75,7 @@ import com.google.android.material.snackbar.Snackbar;
 import com.vagell.kv4pht.BR;
 import com.vagell.kv4pht.R;
 import com.vagell.kv4pht.aprs.AprsController;
+import com.vagell.kv4pht.aprs.AprsIsClient;
 import com.vagell.kv4pht.data.AppSetting;
 import com.vagell.kv4pht.data.ChannelMemory;
 import com.vagell.kv4pht.databinding.ActivityMainBinding;
@@ -505,12 +506,12 @@ public class MainActivity extends AppCompatActivity {
             };
             radioAudioService.setCallbacks(callbacks);
             if (!aprsMessagesObserved) {
-                radioAudioService.getAprsEvents().observe(MainActivity.this, aprsEvents -> {
+                radioAudioService.getAprsFeed().observe(MainActivity.this, aprsFeed -> {
                     boolean autoScroll = shouldAutoScrollAprs();
-                    aprsAdapter.setAprsEvents(aprsEvents);
+                    aprsAdapter.setAprsFeed(aprsFeed);
                     aprsAdapter.notifyDataSetChanged();
-                    if (autoScroll && aprsEvents != null && !aprsEvents.isEmpty()) {
-                        aprsRecyclerView.scrollToPosition(aprsEvents.size() - 1);
+                    if (autoScroll && aprsFeed != null && !aprsFeed.isEmpty()) {
+                        aprsRecyclerView.scrollToPosition(aprsFeed.size() - 1);
                     }
                 });
                 aprsMessagesObserved = true;
@@ -841,6 +842,12 @@ public class MainActivity extends AppCompatActivity {
         applyAprsBeaconPosition(service, settings.get(AppSetting.SETTING_APRS_BEACON_POSITION));
         applyAprsIcon(service, settings.get(AppSetting.SETTING_APRS_ICON));
         applyDigipeatSetting(service, settings.get(AppSetting.SETTING_DIGIPEAT_PACKETS));
+        service.setAprsIsServer(settings.getOrDefault(
+            AppSetting.SETTING_APRS_IS_SERVER, AprsIsClient.DEFAULT_SERVER));
+        service.setAprsIsDisplayEnabled(Boolean.parseBoolean(
+            settings.getOrDefault(AppSetting.SETTING_APRS_IS_DISPLAY, "false")));
+        service.setAprsIgateEnabled(Boolean.parseBoolean(
+            settings.getOrDefault(AppSetting.SETTING_APRS_IGATE, "false")));
         service.setAprsHistoryWindow(settings.getOrDefault(
             AppSetting.SETTING_APRS_HISTORY_WINDOW, AprsController.HISTORY_ALL));
         service.setAprsDestinationFilter(settings.getOrDefault(

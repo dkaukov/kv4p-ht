@@ -50,4 +50,7 @@ public class AprsPacket {
     /** Exact AX.25 frame bytes without FCS, KISS, or serial transport framing. */
     @ColumnInfo(name = "raw_ax25")
     public byte[] rawAx25;
+    /** Exact TNC2 packet line sent to or received from APRS-IS, without a line terminator. */
+    @ColumnInfo(name = "raw_tnc2")
+    public String rawTnc2;
 }

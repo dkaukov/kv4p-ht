@@ -24,8 +24,14 @@ public class ObjectField extends APRSData {
 		this.live = (msgBody[10] == '*');
 		// then we get the timestamp
 		this.timestamp = new TimeField(msgBody, 10);
-		this.position = new PositionField(msgBody, "FOO", 17);
-		this.setLastCursorPosition(36);
+		int positionStart = 18;
+		byte[] positionBody = new byte[msgBody.length - positionStart + 1];
+		positionBody[0] = '!';
+		System.arraycopy(msgBody, positionStart, positionBody, 1,
+			msgBody.length - positionStart);
+		this.position = new PositionField(positionBody, "FOO", 1);
+		this.comment = position.getComment();
+		this.setLastCursorPosition(positionStart + position.getLastCursorPosition() - 1);
 	}
 
 	/**
@@ -69,6 +75,13 @@ public class ObjectField extends APRSData {
 	 */
 	public void setLive(boolean live) {
 		this.live = live;
+	}
+
+	/**
+	 * @return the position carried by this APRS object
+	 */
+	public PositionField getPosition() {
+		return position;
 	}
 
 	

@@ -30,6 +30,7 @@ import com.vagell.kv4pht.aprs.parser.Digipeater;
 import com.vagell.kv4pht.aprs.parser.MessagePacket;
 import com.vagell.kv4pht.aprs.parser.Parser;
 import com.vagell.kv4pht.data.AprsEvent;
+import com.vagell.kv4pht.data.AprsFeedRow;
 import com.vagell.kv4pht.data.AprsPacket;
 import com.vagell.kv4pht.data.AprsSource;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -76,6 +78,7 @@ public class AprsControllerTest {
         assertEquals(2, f.packets.records.size());
         assertEquals(1, f.events.records.size());
         assertEquals(2, f.events.records.get(0).packetCount);
+        assertEquals(1, f.controller.getFeed().getValue().get(0).eventCount);
         assertEquals(1, f.callbacks.notificationCount);
         assertEquals(2, f.callbacks.acknowledgementCount);
     }
@@ -116,6 +119,24 @@ public class AprsControllerTest {
 
         assertEquals(2, f.events.records.size());
         assertEquals(2, f.packets.records.size());
+        assertEquals(1, f.controller.getFeed().getValue().size());
+        AprsFeedRow row = f.controller.getFeed().getValue().get(0);
+        assertEquals(2, row.eventCount);
+        assertEquals(f.events.records.get(1).id, row.event.id);
+    }
+
+    @Test public void separateMessagesRemainSeparateFeedRows() {
+        Fixture f = fixture();
+
+        f.controller.handle(directMessage("VK3ABC", "VK3ME", "first", "A7"),
+            AprsSource.RX_RF, 144_390_000L, null);
+        f.controller.handle(directMessage("VK3ABC", "VK3ME", "second", "A8"),
+            AprsSource.RX_RF, 144_390_000L, null);
+
+        assertEquals(2, f.events.records.size());
+        assertEquals(2, f.controller.getFeed().getValue().size());
+        assertEquals(1, f.controller.getFeed().getValue().get(0).eventCount);
+        assertEquals(1, f.controller.getFeed().getValue().get(1).eventCount);
     }
 
     @Test public void weatherAndObjectEachCreateEvents() throws Exception {
@@ -128,12 +149,32 @@ public class AprsControllerTest {
 
         assertEquals(2, f.events.records.size());
         assertEquals(AprsEvent.WEATHER_TYPE, f.events.records.get(0).type);
-        assertEquals(AprsEvent.OBJECT_TYPE, f.events.records.get(1).type);
+        AprsEvent objectEvent = f.events.records.get(1);
+        assertEquals(AprsEvent.OBJECT_TYPE, objectEvent.type);
+        assertEquals(-37.86083, objectEvent.positionLat, 0.00001);
+        assertEquals(144.97, objectEvent.positionLong, 0.00001);
+        assertEquals("Test", objectEvent.comment);
+    }
+
+    @Test public void internetPositionRetainsCoordinatesForMapAction() {
+        Fixture f = fixture();
+
+        f.controller.handleAprsIsPacket(
+            "VK3SF-10>APDR16,TCPIP*,qAC,T2SYDNEY:=3746.38S/14504.75Eu211/003");
+
+        assertEquals(1, f.events.records.size());
+        AprsEvent event = f.events.records.get(0);
+        assertEquals(AprsEvent.POSITION_TYPE, event.type);
+        assertTrue(event.internetOnly);
+        assertEquals(-37.773, event.positionLat, 0.00001);
+        assertEquals(145.07917, event.positionLong, 0.00001);
     }
 
     @Test public void validUnsupportedPacketCreatesUnknownEventWithRawText() {
         Fixture f = fixture();
-        APRSPacket frame = packetWithPath("WIDE2-1");
+        APRSPacket frame = new APRSPacket("VK3ABC", "APRS",
+            Collections.singletonList(new Digipeater("WIDE2-1")),
+            "?APRS?".getBytes(StandardCharsets.US_ASCII));
 
         f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
 
@@ -141,8 +182,29 @@ public class AprsControllerTest {
         assertEquals(1, f.events.records.size());
         AprsEvent event = f.events.records.get(0);
         assertEquals(AprsEvent.UNKNOWN_TYPE, event.type);
-        assertEquals("Raw: >test", event.comment);
+        assertEquals("Raw: ?APRS?", event.comment);
         assertEquals(Long.valueOf(event.id), f.packets.records.get(0).eventId);
+    }
+
+    @Test public void statusPacketsExposeTextAndLatestStatusFeedRow() {
+        Fixture f = fixture();
+
+        f.controller.handleAprsIsPacket(
+            "VK3VB-B>APCHP0,TCPIP*,qAC,VK3VB-BS:>First status");
+        f.controller.handleAprsIsPacket(
+            "VK3VB-B>APCHP0,TCPIP*,qAC,VK3VB-BS:>162255zPowered by WPSD "
+                + "(https://wpsd.radio/)");
+
+        assertEquals(2, f.events.records.size());
+        AprsEvent latest = f.events.records.get(1);
+        assertEquals(AprsEvent.STATUS_TYPE, latest.type);
+        assertEquals("Powered by WPSD (https://wpsd.radio/)", latest.comment);
+        assertTrue(latest.internetOnly);
+        assertEquals(1, f.controller.getFeed().getValue().size());
+        AprsFeedRow row = f.controller.getFeed().getValue().get(0);
+        assertEquals("status:VK3VB-B", row.feedKey);
+        assertEquals(2, row.eventCount);
+        assertEquals(latest.id, row.event.id);
     }
 
     @Test public void malformedPacketIsStoredWithoutEvent() throws Exception {
@@ -156,6 +218,28 @@ public class AprsControllerTest {
         assertEquals(1, f.packets.records.size());
         assertNull(f.packets.records.get(0).eventId);
         assertTrue(f.events.records.isEmpty());
+    }
+
+    @Test public void stationCapabilitiesExposeReadableLatestFeedRow() {
+        Fixture f = fixture();
+
+        f.controller.handleAprsIsPacket(
+            "VK3RMC-A>APRS,TCPIP*,qAC,T2MELBOURNE:<IGATE,MSG_CNT=0,LOC_CNT=0");
+        AprsEvent first = f.events.records.get(0);
+        assertEquals("IGate · 0 messages · 0 local stations", first.comment);
+        f.controller.handleAprsIsPacket(
+            "VK3RMC-A>APRS,TCPIP*,qAC,T2MELBOURNE:<IGATE,MSG_CNT=1,LOC_CNT=1");
+
+        assertEquals(2, f.events.records.size());
+        AprsEvent event = f.events.records.get(1);
+        assertEquals(AprsEvent.STATION_CAPABILITIES_TYPE, event.type);
+        assertEquals("IGate · 1 message · 1 local station", event.comment);
+        assertTrue(event.internetOnly);
+        assertEquals(1, f.controller.getFeed().getValue().size());
+        AprsFeedRow row = f.controller.getFeed().getValue().get(0);
+        assertEquals("capabilities:VK3RMC-A", row.feedKey);
+        assertEquals(2, row.eventCount);
+        assertEquals(event.id, row.event.id);
     }
 
     @Test public void thirdPartyPreservesOuterPacketAndInnerEvent() throws Exception {
@@ -448,7 +532,7 @@ public class AprsControllerTest {
 
         f.controller.setHistoryWindow(AprsController.HISTORY_ALL);
 
-        List<AprsEvent> visible = f.controller.getEvents().getValue();
+        List<AprsEvent> visible = visibleEvents(f);
         assertEquals(5_000, visible.size());
         assertEquals("event 1", visible.get(0).comment);
         assertEquals("event 5000", visible.get(visible.size() - 1).comment);
@@ -465,15 +549,15 @@ public class AprsControllerTest {
         f.events.records.add(eventAt("older", now - 40 * day));
 
         f.controller.setHistoryWindow(AprsController.HISTORY_ONE_DAY);
-        assertEquals(1, f.controller.getEvents().getValue().size());
+        assertEquals(1, f.controller.getFeed().getValue().size());
         f.controller.setHistoryWindow(AprsController.HISTORY_ONE_WEEK);
-        assertEquals(2, f.controller.getEvents().getValue().size());
+        assertEquals(2, f.controller.getFeed().getValue().size());
         f.controller.setHistoryWindow(AprsController.HISTORY_TWO_WEEKS);
-        assertEquals(3, f.controller.getEvents().getValue().size());
+        assertEquals(3, f.controller.getFeed().getValue().size());
         f.controller.setHistoryWindow(AprsController.HISTORY_ONE_MONTH);
-        assertEquals(4, f.controller.getEvents().getValue().size());
+        assertEquals(4, f.controller.getFeed().getValue().size());
         f.controller.setHistoryWindow(AprsController.HISTORY_ALL);
-        assertEquals(5, f.controller.getEvents().getValue().size());
+        assertEquals(5, f.controller.getFeed().getValue().size());
     }
 
     @Test public void recentlyAggregatedOldEventRemainsOutsideHistoryWindow() {
@@ -485,7 +569,7 @@ public class AprsControllerTest {
 
         f.controller.setHistoryWindow(AprsController.HISTORY_ONE_DAY);
 
-        assertTrue(f.controller.getEvents().getValue().isEmpty());
+        assertTrue(f.controller.getFeed().getValue().isEmpty());
     }
 
     @Test public void packetAggregationDoesNotReorderEventHistory() {
@@ -500,7 +584,7 @@ public class AprsControllerTest {
 
         f.controller.recordTransmission(older.id, retry, 144_390_000L, retry.toAX25Frame());
 
-        List<AprsEvent> visible = f.controller.getEvents().getValue();
+        List<AprsEvent> visible = visibleEvents(f);
         assertEquals("older", visible.get(0).comment);
         assertEquals("newer", visible.get(1).comment);
         assertEquals(1_000L, older.firstSeenMs);
@@ -523,7 +607,7 @@ public class AprsControllerTest {
 
         f.controller.setDestinationFilter(AprsController.DESTINATION_MINE);
 
-        List<AprsEvent> visible = f.controller.getEvents().getValue();
+        List<AprsEvent> visible = visibleEvents(f);
         assertEquals(7, visible.size());
         assertTrue(visible.stream().anyMatch(event -> "outgoing".equals(event.body)));
         assertFalse(visible.stream().anyMatch(event -> "other".equals(event.body)));
@@ -625,6 +709,108 @@ public class AprsControllerTest {
         assertEquals(1, f.packets.records.size());
     }
 
+    @Test public void igateForwardsEligibleRfPacketAndRecordsInternetTransmission() {
+        Fixture f = fixture();
+        f.controller.setIgateEnabled(true);
+        APRSPacket frame = packetWithPath("WIDE1-1");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 145_175_000L, frame.toAX25Frame());
+
+        assertEquals(1, f.callbacks.igateCount);
+        assertEquals("VK3ABC>APRS,WIDE1-1,qAO,VK3ME:>test", f.callbacks.lastIgateLine);
+        assertEquals(Long.valueOf(f.events.records.get(0).id), f.callbacks.lastIgateEventId);
+
+        f.controller.recordAprsIsTransmission(f.callbacks.lastIgateEventId,
+            f.callbacks.lastIgateLine);
+        assertEquals(2, f.packets.records.size());
+        AprsPacket uploaded = f.packets.records.get(1);
+        assertEquals(AprsSource.TX_APRS_IS, uploaded.source);
+        assertEquals(f.callbacks.lastIgateLine, uploaded.rawTnc2);
+        assertNull(uploaded.frequencyHz);
+        assertNull(uploaded.rawAx25);
+    }
+
+    @Test public void incomingAprsIsMessageIsDisplayedWithoutRfTransmissionOrAck() {
+        Fixture f = fixture();
+        f.controller.setDigipeatingEnabled(true);
+        f.controller.setIgateEnabled(true);
+        String line = "VK3ABC>APRS,TCPIP*,qAC,T2TEST::VK3ME   :hello{A7";
+
+        f.controller.handleAprsIsPacket(line);
+
+        assertEquals(1, f.events.records.size());
+        assertEquals(1, f.packets.records.size());
+        AprsEvent event = f.events.records.get(0);
+        AprsPacket packet = f.packets.records.get(0);
+        assertEquals(AprsEvent.MESSAGE_TYPE, event.type);
+        assertTrue(event.internetOnly);
+        assertEquals(AprsSource.RX_APRS_IS, packet.source);
+        assertEquals(line, packet.rawTnc2);
+        assertNull(packet.rawAx25);
+        assertEquals(1, f.callbacks.notificationCount);
+        assertEquals(0, f.callbacks.acknowledgementCount);
+        assertEquals(0, f.callbacks.digipeatCount);
+        assertEquals(0, f.callbacks.igateCount);
+    }
+
+    @Test public void matchingRfCopyMergesWithInternetEventAndClearsInternetIndicator()
+            throws Exception {
+        Fixture f = fixture();
+        String internet = "VK3ABC>APRS,TCPIP*,qAC,T2TEST:>same";
+        APRSPacket rf = Parser.parse("VK3ABC>APRS,WIDE1-1:>same");
+
+        f.controller.handleAprsIsPacket(internet);
+        f.controller.handle(rf, AprsSource.RX_RF, 144_390_000L, rf.toAX25Frame());
+
+        assertEquals(1, f.events.records.size());
+        assertEquals(2, f.packets.records.size());
+        assertEquals(2, f.events.records.get(0).packetCount);
+        assertFalse(f.events.records.get(0).internetOnly);
+    }
+
+    @Test public void internetOnlyHistoryRemainsVisibleAfterRefresh() {
+        Fixture f = fixture();
+
+        f.controller.handleAprsIsPacket("VK3ABC>APRS,qAO,VK3ME:>online");
+
+        assertEquals(1, f.controller.getFeed().getValue().size());
+        f.controller.setHistoryWindow(AprsController.HISTORY_ALL);
+        assertEquals(1, f.controller.getFeed().getValue().size());
+        assertTrue(f.controller.getFeed().getValue().get(0).event.internetOnly);
+    }
+
+    @Test public void igateRejectsForbiddenPathsQueriesAndNonRfPackets() throws Exception {
+        Fixture f = fixture();
+        f.controller.setIgateEnabled(true);
+        for (String path : List.of("TCPIP", "TCPXX", "NOGATE", "RFONLY", "qAR")) {
+            APRSPacket frame = packetWithPath(path);
+            f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+        }
+        APRSPacket query = new APRSPacket("VK3ABC", "APRS", Collections.emptyList(),
+            "?APRS?".getBytes(StandardCharsets.US_ASCII));
+        f.controller.handle(query, AprsSource.RX_RF, 144_390_000L, query.toAX25Frame());
+        APRSPacket notRf = packetWithPath("WIDE1-1");
+        f.controller.handle(notRf, AprsSource.UNKNOWN, null, notRf.toAX25Frame());
+        APRSPacket internetThirdParty = Parser.parse(
+            "VK3DIG>APRS:}VK3ABC>APRS,TCPIP*:>test");
+        f.controller.handle(internetThirdParty, AprsSource.RX_RF, 144_390_000L,
+            internetThirdParty.toAX25Frame());
+
+        assertEquals(0, f.callbacks.igateCount);
+    }
+
+    @Test public void igateStripsNonInternetThirdPartyWrapper() throws Exception {
+        Fixture f = fixture();
+        f.controller.setIgateEnabled(true);
+        APRSPacket frame = Parser.parse(
+            "VK3DIG>APRS,WIDE1-1:}VK3ABC>APRS,WIDE2-1:>test");
+
+        f.controller.handle(frame, AprsSource.RX_RF, 144_390_000L, frame.toAX25Frame());
+
+        assertEquals(1, f.callbacks.igateCount);
+        assertEquals("VK3ABC>APRS,WIDE2-1,qAO,VK3ME:>test", f.callbacks.lastIgateLine);
+    }
+
     @Test public void stationAddressRulesRemainCompatible() {
         assertTrue(AprsController.requiresAcknowledgement("VK3ABC-7"));
         assertFalse(AprsController.requiresAcknowledgement("BLN1CQ"));
@@ -704,6 +890,14 @@ public class AprsControllerTest {
         return event;
     }
 
+    private static List<AprsEvent> visibleEvents(Fixture fixture) {
+        List<AprsEvent> visible = new ArrayList<>();
+        for (AprsFeedRow row : fixture.controller.getFeed().getValue()) {
+            visible.add(row.event);
+        }
+        return visible;
+    }
+
     private void assertRetry(AprsEvent event, int attempts, long nextRetryAt) {
         assertEquals(attempts, event.transmitAttempts);
         assertEquals(Long.valueOf(nextRetryAt), event.nextRetryAtMs);
@@ -740,24 +934,71 @@ public class AprsControllerTest {
         int dueLoadCount;
         int nextRetryLoadCount;
 
-        @Override public List<AprsEvent> loadEvents(long sinceMs, String localCallsign,
+        @Override public List<AprsFeedRow> loadFeed(long sinceMs, String localCallsign,
                                                     boolean mineOnly, int limit) {
             loadCount++;
-            List<AprsEvent> visible = new ArrayList<>();
-            for (AprsEvent event : records) {
-                if (event.firstSeenMs < sinceMs) continue;
+            List<AprsFeedRow> materialized = new ArrayList<>();
+            for (int index = 0; index < records.size(); index++) {
+                AprsEvent event = records.get(index);
+                String key = testFeedKey(event, index);
+                AprsFeedRow row = null;
+                for (AprsFeedRow candidate : materialized) {
+                    if (key.equals(candidate.feedKey)) {
+                        row = candidate;
+                        break;
+                    }
+                }
+                if (row == null) {
+                    row = new AprsFeedRow();
+                    row.feedKey = key;
+                    row.event = event;
+                    row.sortTimeMs = event.firstSeenMs;
+                    row.eventCount = 1;
+                    materialized.add(row);
+                } else {
+                    row.eventCount++;
+                    if (event.firstSeenMs >= row.sortTimeMs) {
+                        row.event = event;
+                        row.sortTimeMs = event.firstSeenMs;
+                    }
+                }
+            }
+
+            List<AprsFeedRow> visible = new ArrayList<>();
+            for (AprsFeedRow row : materialized) {
+                AprsEvent event = row.event;
+                if (row.sortTimeMs < sinceMs) continue;
                 String destination = event.toCallsign;
                 boolean broadcast = destination != null && (destination.startsWith("BLN")
                     || destination.equals("ALL") || destination.equals("QST")
                     || destination.equals("CQ"));
                 if (!mineOnly || event.type != AprsEvent.MESSAGE_TYPE
                         || localCallsign.equals(event.fromCallsign)
-                        || localCallsign.equals(destination) || broadcast) visible.add(event);
+                        || localCallsign.equals(destination) || broadcast) visible.add(row);
             }
-            visible.sort(Comparator.comparingLong((AprsEvent event) -> event.firstSeenMs)
-                .thenComparingLong(event -> event.id));
+            visible.sort(Comparator.comparingLong((AprsFeedRow row) -> row.sortTimeMs)
+                .thenComparingLong(row -> row.event.id));
             int firstVisible = Math.max(0, visible.size() - limit);
             return new ArrayList<>(visible.subList(firstVisible, visible.size()));
+        }
+
+        private String testFeedKey(AprsEvent event, int index) {
+            String source = event.fromCallsign == null
+                ? "" : event.fromCallsign.trim().toUpperCase(Locale.ROOT);
+            if (!source.isEmpty()) {
+                if (event.type == AprsEvent.POSITION_TYPE) return "position:" + source;
+                if (event.type == AprsEvent.WEATHER_TYPE) return "weather:" + source;
+                if (event.type == AprsEvent.STATUS_TYPE) return "status:" + source;
+                if (event.type == AprsEvent.STATION_CAPABILITIES_TYPE) {
+                    return "capabilities:" + source;
+                }
+                if (event.type == AprsEvent.OBJECT_TYPE && event.objectName != null
+                        && !event.objectName.trim().isEmpty()) {
+                    return "object:" + source + ":"
+                        + event.objectName.trim().toUpperCase(Locale.ROOT);
+                }
+            }
+            return "event:" + event.id + ":" + index;
         }
 
         @Override public List<AprsEvent> loadDueReliableEvents(long now) {
@@ -783,7 +1024,7 @@ public class AprsControllerTest {
             return nextRetryAt;
         }
 
-        @Override public long insert(AprsEvent event) {
+        @Override public long insert(AprsEvent event, String feedKey) {
             event.id = records.size() + 1L;
             records.add(event);
             return event.id;
@@ -827,9 +1068,12 @@ public class AprsControllerTest {
         int digipeatCount;
         int notificationCount;
         int acknowledgementCount;
+        int igateCount;
         boolean retrySucceeds = true;
         boolean digipeatSucceeds = true;
         APRSPacket lastDigipeatedPacket;
+        String lastIgateLine;
+        Long lastIgateEventId;
 
         @Override public String getCallsign() {
             return callsign;
@@ -863,6 +1107,13 @@ public class AprsControllerTest {
             if (!digipeatSucceeds) return null;
             lastDigipeatedPacket = packet;
             return new AprsController.Transmission(packet, 144_390_000L, packet.toAX25Frame());
+        }
+
+        @Override public boolean gateToAprsIs(String tnc2, Long eventId) {
+            igateCount++;
+            lastIgateLine = tnc2;
+            lastIgateEventId = eventId;
+            return true;
         }
     }
 }

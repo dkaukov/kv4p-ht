@@ -28,6 +28,7 @@ import androidx.room.PrimaryKey;
     tableName = "aprs_events",
     indices = {
         @Index("first_seen_ms"),
+        @Index(value = {"internet_only", "first_seen_ms"}),
         @Index(value = {"type", "to_callsign", "first_seen_ms"}),
         @Index(value = {"dedup_key", "last_seen_ms"}),
         @Index(value = {"delivery_state", "next_retry_at_ms"}),
@@ -40,6 +41,8 @@ public class AprsEvent {
     public static final int OBJECT_TYPE = 2;
     public static final int POSITION_TYPE = 3;
     public static final int WEATHER_TYPE = 4;
+    public static final int STATUS_TYPE = 5;
+    public static final int STATION_CAPABILITIES_TYPE = 6;
 
     public static final int DELIVERY_NONE = 0;
     public static final int DELIVERY_PENDING = 1;
@@ -63,6 +66,9 @@ public class AprsEvent {
     /** Whether this station retransmitted at least one packet associated with this event. */
     @ColumnInfo(name = "digipeated", defaultValue = "0")
     public boolean digipeated;
+    /** Whether every received copy associated with this event came from APRS-IS. */
+    @ColumnInfo(name = "internet_only", defaultValue = "0")
+    public boolean internetOnly;
     /** Stable controller-generated key used to collapse recent duplicate observations. */
     @ColumnInfo(name = "dedup_key")
     public String dedupKey;
