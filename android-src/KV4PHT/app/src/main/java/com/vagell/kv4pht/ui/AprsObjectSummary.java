@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 /** Produces conservative human-readable summaries of common APRS object comments. */
 final class AprsObjectSummary {
     private static final Pattern HISTORIC_SYMBOL_PREFIX = Pattern.compile(
-        "^[^A-Za-z0-9](?=(?:RNG\\d{4}|R\\d{1,4}[km]|\\d{3,4}\\.\\d))",
+        "^[^a-z0-9](?=(?:RNG\\d{4}|R\\d{1,4}[km]|\\d{3,4}\\.\\d))",
         Pattern.CASE_INSENSITIVE);
     private static final Pattern HISTORIC_LETTER_PREFIX = Pattern.compile(
         "^[air]\\s*(?=(?:RNG\\d{4}|R\\d{1,4}[km]))", Pattern.CASE_INSENSITIVE);
@@ -144,8 +144,19 @@ final class AprsObjectSummary {
     }
 
     private static String cleanDescription(String value) {
-        return normalizeWhitespace(value.replace('(', ' ').replace(')', ' ')
-            .replaceAll("\\s*,\\s*", " · "));
+        return normalizeWhitespace(joinCommaSeparatedParts(
+            value.replace('(', ' ').replace(')', ' ')));
+    }
+
+    private static String joinCommaSeparatedParts(String value) {
+        StringBuilder result = new StringBuilder();
+        for (String part : value.split(",")) {
+            String normalized = part.trim();
+            if (normalized.isEmpty()) continue;
+            if (result.length() > 0) result.append(" · ");
+            result.append(normalized);
+        }
+        return result.toString();
     }
 
     private static String serviceName(String mode, String description) {

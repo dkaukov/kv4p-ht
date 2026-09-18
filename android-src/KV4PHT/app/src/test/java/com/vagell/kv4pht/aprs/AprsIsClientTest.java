@@ -66,8 +66,7 @@ public class AprsIsClientTest {
         ExecutorService serverWorker = Executors.newSingleThreadExecutor();
         try (ServerSocket server = new ServerSocket(0)) {
             serverWorker.execute(() -> serveVerifiedSession(server, received, packetsReceived));
-            AprsIsClient client = new AprsIsClient("2.0 test");
-            try {
+            try (AprsIsClient client = new AprsIsClient("2.0 test")) {
                 assertTrue(client.setServer("127.0.0.1:" + server.getLocalPort()));
                 client.setCallsign("vk3abc-9");
                 client.setTransmitEnabled(true);
@@ -84,8 +83,6 @@ public class AprsIsClientTest {
                     + " vers KV4PHT 2.0_test", received.get(0));
                 assertEquals("VK3RF>APRS,qAO,VK3ABC-9:>one", received.get(1));
                 assertEquals("VK3RF>APRS,qAO,VK3ABC-9:>two", received.get(2));
-            } finally {
-                client.close();
             }
         } finally {
             serverWorker.shutdownNow();
@@ -93,15 +90,12 @@ public class AprsIsClientTest {
     }
 
     @Test public void disabledInvalidCallsignAndMultilinePacketsAreRejected() {
-        AprsIsClient client = new AprsIsClient("2.0");
-        try {
+        try (AprsIsClient client = new AprsIsClient("2.0")) {
             assertFalse(client.send("VK3ABC", "VK3RF>APRS:>disabled", null));
             client.setEnabled(true);
             assertFalse(client.send("VK3ABC", "VK3RF>APRS:>receive only", null));
             assertFalse(client.send("", "VK3RF>APRS:>test", null));
             assertFalse(client.send("VK3ABC", "VK3RF>APRS:>test\r\nsecond", null));
-        } finally {
-            client.close();
         }
     }
 
@@ -122,11 +116,10 @@ public class AprsIsClientTest {
         ExecutorService serverWorker = Executors.newSingleThreadExecutor();
         try (ServerSocket server = new ServerSocket(0)) {
             serverWorker.execute(() -> serveIncomingPacket(server, received));
-            AprsIsClient client = new AprsIsClient("2.0", packet -> {
+            try (AprsIsClient client = new AprsIsClient("2.0", packet -> {
                 received.add(packet);
                 packetDelivered.countDown();
-            });
-            try {
+            })) {
                 assertTrue(client.setServer("127.0.0.1:" + server.getLocalPort()));
                 client.setCallsign("VK3ABC");
                 client.setReceiveEnabled(true);
@@ -136,8 +129,6 @@ public class AprsIsClientTest {
                 assertEquals("user VK3ABC pass -1 vers KV4PHT 2.0 filter m/50",
                     received.get(0));
                 assertEquals("VK3RF>APRS,qAO,VK3ABC:>nearby", received.get(1));
-            } finally {
-                client.close();
             }
         } finally {
             serverWorker.shutdownNow();

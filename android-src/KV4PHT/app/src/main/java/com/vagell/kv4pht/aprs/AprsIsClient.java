@@ -226,7 +226,7 @@ public final class AprsIsClient implements AutoCloseable {
             if (!loggedIn) {
                 logInfo("Reconnecting to APRS-IS in " + reconnectDelay + " ms");
             }
-            if (!awaitReconnect(reconnectDelay)) return;
+            if (!awaitReconnect(reconnectDelay, configuration.generation)) return;
             if (!loggedIn) {
                 reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
             }
@@ -253,9 +253,8 @@ public final class AprsIsClient implements AutoCloseable {
 
     private boolean runSession(ConnectionConfiguration configuration) {
         // Port 14580 is APRS-IS's standardized plaintext feed; its passcode is not a secret.
-        Socket socket = new Socket(); // NOSONAR
         boolean loggedIn = false;
-        try {
+        try (Socket socket = new Socket()) { // NOSONAR
             logInfo("Connecting to APRS-IS " + configuration.server.normalized
                 + " as " + configuration.callsign + ", receive="
                 + configuration.receiveEnabled + ", transmit="
@@ -271,29 +270,29 @@ public final class AprsIsClient implements AutoCloseable {
             socket.setTcpNoDelay(true);
             socket.setSoTimeout(LOGIN_TIMEOUT_MS);
 
-            BufferedReader reader = new BufferedReader(new InputStreamReader(
-                socket.getInputStream(), StandardCharsets.ISO_8859_1));
-            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
-                socket.getOutputStream(), StandardCharsets.ISO_8859_1));
-            if (reader.readLine() == null) throw new IOException("APRS-IS closed before login");
-            int loginPasscode = configuration.transmitEnabled
-                ? passcode(configuration.callsign) : -1;
-            writeLine(writer, loginLine(configuration.callsign, loginPasscode, softwareVersion,
-                configuration.receiveEnabled, configuration.filterLatitude,
-                configuration.filterLongitude));
-            awaitLogin(reader, configuration.callsign, configuration.transmitEnabled);
-            loggedIn = true;
-            logInfo("APRS-IS login accepted for " + configuration.callsign);
-            socket.setSoTimeout(READ_POLL_MS);
-            drainSession(reader, writer, configuration);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    socket.getInputStream(), StandardCharsets.ISO_8859_1));
+                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
+                    socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
+                String greeting = reader.readLine();
+                if (greeting == null) throw new IOException("APRS-IS closed before login");
+                int loginPasscode = configuration.transmitEnabled
+                    ? passcode(configuration.callsign) : -1;
+                writeLine(writer, loginLine(configuration.callsign, loginPasscode, softwareVersion,
+                    configuration.receiveEnabled, configuration.filterLatitude,
+                    configuration.filterLongitude));
+                awaitLogin(reader, configuration.callsign, configuration.transmitEnabled);
+                loggedIn = true;
+                logInfo("APRS-IS login accepted for " + configuration.callsign);
+                socket.setSoTimeout(READ_POLL_MS);
+                drainSession(reader, writer, configuration);
+            }
         } catch (IOException error) {
             if (isCurrent(configuration)) {
                 logWarning("APRS-IS session failed: " + error.getMessage(), error);
             } else {
                 logDebug("APRS-IS session closed after configuration change");
             }
-        } finally {
-            closeQuietly(socket);
         }
         return loggedIn;
     }
@@ -357,14 +356,19 @@ public final class AprsIsClient implements AutoCloseable {
         }
     }
 
-    private boolean awaitReconnect(long delayMs) {
+    private boolean awaitReconnect(long delayMs, long sessionGeneration) {
         synchronized (lock) {
-            if (closed) return false;
-            try {
-                lock.wait(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
+            long deadlineMs = System.currentTimeMillis() + delayMs;
+            while (!closed && configurationGeneration == sessionGeneration
+                    && pendingPackets.isEmpty()) {
+                long remainingMs = deadlineMs - System.currentTimeMillis();
+                if (remainingMs <= 0) break;
+                try {
+                    lock.wait(remainingMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
             }
             return !closed;
         }

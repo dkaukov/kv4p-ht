@@ -99,6 +99,7 @@ import static com.google.android.material.snackbar.Snackbar.LENGTH_LONG;
 import static com.vagell.kv4pht.radio.RadioAudioService.INTENT_OPEN_CHAT;
 
 public class MainActivity extends AppCompatActivity {
+    private static final String DEFAULT_BOOLEAN_FALSE = "false";
     private static final int APRS_AUTO_SCROLL_DISTANCE = 2;
     private static final String EXTRA_MEMORY_ID = "memoryId";
 
@@ -819,7 +820,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyAccessibilitySettings(Map<String, String> settings) {
-        boolean disableAnimations = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_DISABLE_ANIMATIONS, "false"));
+        boolean disableAnimations = Boolean.parseBoolean(settings.getOrDefault(
+            AppSetting.SETTING_DISABLE_ANIMATIONS, DEFAULT_BOOLEAN_FALSE));
         if (disableAnimations) {
             ImageView rxAudioView = findViewById(R.id.rxAudioCircle);
             ViewGroup.MarginLayoutParams layoutParams = (ViewGroup.MarginLayoutParams) rxAudioView.getLayoutParams();
@@ -828,7 +830,8 @@ public class MainActivity extends AppCompatActivity {
             rxAudioView.setLayoutParams(layoutParams);
         }
 
-        stickyPTT = Boolean.parseBoolean(settings.getOrDefault(AppSetting.SETTING_STICKY_PTT, "false"));
+        stickyPTT = Boolean.parseBoolean(settings.getOrDefault(
+            AppSetting.SETTING_STICKY_PTT, DEFAULT_BOOLEAN_FALSE));
     }
 
     private void applyAprsSettings(Map<String, String> settings) {
@@ -845,9 +848,9 @@ public class MainActivity extends AppCompatActivity {
         service.setAprsIsServer(settings.getOrDefault(
             AppSetting.SETTING_APRS_IS_SERVER, AprsIsClient.DEFAULT_SERVER));
         service.setAprsIsDisplayEnabled(Boolean.parseBoolean(
-            settings.getOrDefault(AppSetting.SETTING_APRS_IS_DISPLAY, "false")));
+            settings.getOrDefault(AppSetting.SETTING_APRS_IS_DISPLAY, DEFAULT_BOOLEAN_FALSE)));
         service.setAprsIgateEnabled(Boolean.parseBoolean(
-            settings.getOrDefault(AppSetting.SETTING_APRS_IGATE, "false")));
+            settings.getOrDefault(AppSetting.SETTING_APRS_IGATE, DEFAULT_BOOLEAN_FALSE)));
         service.setAprsHistoryWindow(settings.getOrDefault(
             AppSetting.SETTING_APRS_HISTORY_WINDOW, AprsController.HISTORY_ALL));
         service.setAprsDestinationFilter(settings.getOrDefault(
