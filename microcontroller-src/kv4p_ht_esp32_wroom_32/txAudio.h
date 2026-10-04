@@ -107,7 +107,12 @@ void initI2STx() {
   auto config = out.defaultConfig(TX_MODE);
   config.copyFrom(txInfo);
   config.pin_data = hw.pins.pinAudioOut;
+#if CONFIG_IDF_TARGET_ESP32S3
+  config.pin_ws = -1;
+  config.pin_bck = -1;
+#else
   config.pin_ws = 27;
+#endif
   config.use_apll = true;
   config.auto_clear = false;
   config.signal_type = PDM;
@@ -118,7 +123,6 @@ void initI2STx() {
     txDecodeStream.begin(txAudioInfo);
     txDecodeStreamStarted = true;
   }
-  i2s_zero_dma_buffer(I2S_NUM_0);
   // Start TX meter at full scale to match radio-style TX indication.
   // Subsequent audio frames update this to the measured TX audio level.
   updateTxAudioLevel(1.0f);

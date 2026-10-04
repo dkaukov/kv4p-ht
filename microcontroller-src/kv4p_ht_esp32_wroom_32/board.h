@@ -109,6 +109,7 @@ void inline boardSetup() {
   if (isHardwareConfigExists()) {
     loadHardwareConfig();
   } else {
+#if CONFIG_IDF_TARGET_ESP32
     // Fallback to legacy detection
     switch (getHardwareVersion()) {
       case HW_VER_V2_0C:
@@ -126,6 +127,7 @@ void inline boardSetup() {
         saveHardwareConfig();
         break;
     }
+#endif
   }
   // Set up the hardware features
   hw.features.hasHL = (hw.pins.pinHl != -1);

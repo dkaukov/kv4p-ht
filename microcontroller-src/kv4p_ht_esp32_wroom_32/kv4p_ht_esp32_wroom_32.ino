@@ -17,7 +17,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <Arduino.h>
+#if CONFIG_IDF_TARGET_ESP32
 #include <BluetoothSerial.h>
+#endif
 #include <DRA818.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -54,14 +56,16 @@ Kv4pBleKissStream::Config bleKissConfig() {
   cfg.minNotifyIntervalMs = 0;
   cfg.notifyFailureBackoffMs = 25;
   cfg.writeQueueWaitMs = 15;
-  cfg.txPower = ESP_PWR_LVL_P7;
+  cfg.txPower = ESP_PWR_LVL_P9;
   return cfg;
 }
 
-DRA818 sa818_vhf(&Serial2, SA818_VHF);
-DRA818 sa818_uhf(&Serial2, SA818_UHF);
+DRA818 sa818_vhf(&Serial1, SA818_VHF);
+DRA818 sa818_uhf(&Serial1, SA818_UHF);
 DRA818 &sa818 = sa818_vhf;
+#if CONFIG_IDF_TARGET_ESP32
 BluetoothSerial SerialBT;
+#endif
 Kv4pBleKissStream bleKissStream(bleKissConfig());
 bool bluetoothStarted = false;
 bool bluetoothProtocolConnected = false;
@@ -281,8 +285,8 @@ bool radioConfigChanged() {
 }
 
 void drainRadioSerial() {
-  while (Serial2.available()) {
-    Serial2.read();
+  while (Serial1.available()) {
+    Serial1.read();
   }
 }
 
@@ -379,6 +383,9 @@ void setup() {
   Serial.setRxBufferSize(USB_BUFFER_SIZE);
   Serial.setTxBufferSize(USB_BUFFER_SIZE);
   protocolUsbSession.windowSize = USB_BUFFER_SIZE;
+#if CONFIG_IDF_TARGET_ESP32S3
+  protocolUsbSession.connected = false;
+#endif
   Serial.begin(115200);
   Serial.println();
   Serial.println("===== kv4p serial output =====");
@@ -387,6 +394,7 @@ void setup() {
   Serial.println("Use `logcat` or a kv4p decoder to view readable logs.");
   Serial.println("More info: https://github.com/VanceVagell/kv4p-ht/blob/main/microcontroller-src/kv4p_ht_esp32_wroom_32/readme.md");
   Serial.println("==============================");
+#if CONFIG_IDF_TARGET_ESP32
   char bluetoothDeviceName[12];
   formatBluetoothDeviceName(bluetoothDeviceName, sizeof(bluetoothDeviceName));
   bluetoothStarted = SerialBT.begin(bluetoothDeviceName);
@@ -396,6 +404,7 @@ void setup() {
   } else {
     Serial.println("Classic Bluetooth init failed");
   }
+#endif
   formatBluetoothDeviceName(bleKissDeviceName, sizeof(bleKissDeviceName));
   protocolBleSession.stream = &bleKissStream;
   protocolBleSession.windowSize = BLE_KISS_WINDOW_SIZE;
@@ -406,8 +415,13 @@ void setup() {
     Serial.println(bleKissDeviceName);
   }
   // Configure watch dog timer (WDT), which will reset the system if it gets stuck somehow.
-  esp_task_wdt_init(10, true);  // Reboot if locked up for a bit
-  esp_task_wdt_add(NULL);       // Add the current task to WDT watch
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms = 10000,
+    .idle_core_mask = 0,
+    .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdtConfig);
+  esp_task_wdt_add(NULL);
   buttonsSetup();
   // Set up radio module defaults
   pinMode(hw.pins.pinPd, OUTPUT);
@@ -420,8 +434,8 @@ void setup() {
     digitalWrite(hw.pins.pinHl, LOW);  // High power
   }
   // Communication with DRA818V radio module via GPIO pins
-  Serial2.begin(9600, SERIAL_8N1, hw.pins.pinRfModuleRxd, hw.pins.pinRfModuleTxd);
-  Serial2.setTimeout(10);  // Very short so we don't tie up rx audio while reading from radio module (responses are tiny so this is ok)
+  Serial1.begin(9600, SERIAL_8N1, hw.pins.pinRfModuleRxd, hw.pins.pinRfModuleTxd);
+  Serial1.setTimeout(10);  // Very short so we don't tie up rx audio while reading from radio module (responses are tiny so this is ok)
   //
   debugSetup();
   // Begin in STOPPED mode
@@ -433,7 +447,9 @@ void setup() {
   if (radioModuleStatus == RADIO_MODULE_FOUND) {
     reconcileDesiredState(false);
   }
+#if !CONFIG_IDF_TARGET_ESP32S3
   sendHello(protocolUsbSession, FIRMWARE_VER, radioModuleStatus, hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(), currentDeviceState(protocolUsbSession.flags));
+#endif
   _LOGI("Setup is finished");
 }
 
@@ -637,8 +653,8 @@ void rssiLoop() {
         // TODO fix the dra818 library's implementation of rssi(). Right now it just drops the
         // return value from the module, and just tells us success/fail.
         // int rssi = dra->rssi();
-        Serial2.println("RSSI?");
-        String rssiResponse = Serial2.readString();
+        Serial1.println("RSSI?");
+        String rssiResponse = Serial1.readString();
         if (rssiResponse.length() > 7) {
           String rssiStr = rssiResponse.substring(5);
           int rssiInt    = rssiStr.toInt();
@@ -675,6 +691,7 @@ void deviceStateLoop() {
 }
 
 void bluetoothLoop() {
+#if CONFIG_IDF_TARGET_ESP32
   if (!bluetoothStarted) {
     return;
   }
@@ -699,6 +716,7 @@ void bluetoothLoop() {
   if (bluetoothProtocolConnected) {
     bluetoothParser.loop();
   }
+#endif
 }
 
 void bleKissLoop() {
@@ -727,6 +745,27 @@ void bleKissLoop() {
   }
 }
 
+void usbConnectionLoop() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  // Native CDC disappears and reappears on reset. Send HELLO each time the
+  // Android host opens the new port, after it has asserted DTR.
+  bool connected = static_cast<bool>(Serial);
+  if (connected && !protocolUsbSession.connected) {
+    parser.reset();
+    protocolUsbSession.connected = true;
+    sendHello(protocolUsbSession, FIRMWARE_VER, radioModuleStatus,
+      hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(),
+      getFirmwareFeatures(), currentDeviceState(protocolUsbSession.flags));
+  } else if (!connected && protocolUsbSession.connected) {
+    protocolUsbSession.connected = false;
+    uint16_t oldSessionFlags = protocolUsbSession.flags;
+    protocolUsbSession.flags = 0;
+    parser.reset();
+    if (oldSessionFlags != 0) reconcileDesiredState();
+  }
+#endif
+}
+
 void squelchLoop() {
   freeDvSquelchLoop();
   if (freeDv2400bEnabled()) return;
@@ -738,6 +777,7 @@ void squelchLoop() {
 }
 
 void loop() {
+  usbConnectionLoop();
   squelchLoop();
   debugLoop();
   ledLoop();

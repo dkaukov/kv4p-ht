@@ -126,8 +126,8 @@ public class RadioAudioService extends Service {
 
 
     // === USB Device Matching ===
-    private static final int[] ESP32_VENDOR_IDS = {4292, 6790};
-    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987};
+    private static final int[] ESP32_VENDOR_IDS = {4292, 6790, 0x303a};
+    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987, 0x1001};
 
     // === Audio Constants ===
     public static final int AUDIO_SAMPLE_RATE = 16000;
@@ -203,6 +203,7 @@ public class RadioAudioService extends Service {
     private UsbManager usbManager;
     private RadioTransport activeTransport;
     private boolean usbPermissionRequestPending = false;
+    private int pendingUsbDeviceId = -1;
     @Getter
     private Protocol.Sender hostToEsp32;
     @Getter
@@ -1128,6 +1129,7 @@ public class RadioAudioService extends Service {
     public void reconnectViaUSB() {
         Log.i(TAG, connectLog("reconnectViaUSB(): clearing pending state for next attempt"));
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         // Re-plug is an explicit user/device action; allow connection attempts again.
         radioMissingNotified = false;
     }
@@ -1141,6 +1143,7 @@ public class RadioAudioService extends Service {
     public void onUsbPermissionDenied() {
         Log.w(TAG, connectLog("USB permission denied by system dialog"));
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         radioMissing();
     }
 
@@ -1174,6 +1177,21 @@ public class RadioAudioService extends Service {
         Optional<UsbDevice> device = usbManager.getDeviceList().values().stream()
             .filter(this::isESP32Device)
             .findFirst();
+        if (usbPermissionRequestPending && (!device.isPresent()
+            || device.get().getDeviceId() != pendingUsbDeviceId)) {
+            usbPermissionRequestPending = false;
+            pendingUsbDeviceId = -1;
+        }
+        if (activeTransport instanceof UsbSerialRadioTransport) {
+            UsbDevice connectedDevice = ((UsbSerialRadioTransport) activeTransport)
+                .getSerialPort().getDriver().getDevice();
+            if (!device.isPresent() || device.get().getDeviceId() != connectedDevice.getDeviceId()) {
+                Log.i(TAG, connectLog("reconcileConnections(): USB device re-enumerated"));
+                radioMissing();
+                usbPermissionRequestPending = false;
+                pendingUsbDeviceId = -1;
+            }
+        }
         if (isConnectionReady()) {
             return;
         }
@@ -1216,16 +1234,17 @@ public class RadioAudioService extends Service {
      */
     public void setupSerialConnection() {
         Log.d(TAG, connectLog("setupSerialConnection(): begin"));
-        // Find all available drivers from attached devices.
+        // Probe only the selected radio; another USB serial device may be attached.
         UsbManager manager = (UsbManager) getSystemService(Context.USB_SERVICE);
-        List<UsbSerialDriver> availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager);
-        if (availableDrivers.isEmpty()) {
+        Optional<UsbDevice> radioDevice = manager.getDeviceList().values().stream()
+            .filter(this::isESP32Device).findFirst();
+        UsbSerialDriver driver = radioDevice.isPresent()
+            ? UsbSerialProber.getDefaultProber().probeDevice(radioDevice.get()) : null;
+        if (driver == null) {
             Log.d(TAG, connectLog("setupSerialConnection(): no available USB drivers"));
             radioMissing();
             return;
         }
-        // Open a connection to the first available driver.
-        UsbSerialDriver driver = availableDrivers.get(0);
         if (!manager.hasPermission(driver.getDevice())) {
             if (usbPermissionRequestPending) {
                 Log.d(TAG, connectLog("setupSerialConnection(): USB permission request already pending"));
@@ -1233,6 +1252,7 @@ public class RadioAudioService extends Service {
             }
             Log.i(TAG, connectLog("setupSerialConnection(): requesting USB permission"));
             usbPermissionRequestPending = true;
+            pendingUsbDeviceId = driver.getDevice().getDeviceId();
             PendingIntent permissionIntent = PendingIntent.getBroadcast(
                 this,
                 0,
@@ -1243,6 +1263,7 @@ public class RadioAudioService extends Service {
             return;
         }
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         UsbDeviceConnection connection = manager.openDevice(driver.getDevice());
         if (connection == null) {
             Log.w(TAG, connectLog("setupSerialConnection(): couldn't open USB device"));

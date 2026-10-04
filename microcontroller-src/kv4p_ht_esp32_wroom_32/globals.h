@@ -77,6 +77,22 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 #define I2S_ADC_CHANNEL ADC1_CHANNEL_6
 
 // Connections to radio module
+#if CONFIG_IDF_TARGET_ESP32S3
+// ESP32-S3-Zero wiring. GPIO19/20 are reserved for native USB.
+// Hardware-config NVS can override each pin.
+#define DEFAULT_PIN_RF_RXD    44
+#define DEFAULT_PIN_RF_TXD    43
+#define DEFAULT_PIN_AUDIO_OUT 2
+#define DEFAULT_PIN_AUDIO_IN  1
+#define DEFAULT_PIN_PTT       4
+#define DEFAULT_PIN_PD        5
+#define DEFAULT_PIN_SQ        7
+#define DEFAULT_PIN_PHYS_PTT1 8
+#define DEFAULT_PIN_PHYS_PTT2 9
+#define DEFAULT_PIN_LED        11
+#define DEFAULT_PIN_PIXELS    21  // Onboard RGB LED
+#define DEFAULT_PIN_HL        6
+#else
 #define DEFAULT_PIN_RF_RXD    16
 #define DEFAULT_PIN_RF_TXD    17
 #define DEFAULT_PIN_AUDIO_OUT 25  // This constant not used, just here for reference. GPIO 25 is implied by use of I2S_DAC_CHANNEL_RIGHT_EN.
@@ -89,6 +105,7 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 #define DEFAULT_PIN_LED        2  // Built in LED
 #define DEFAULT_PIN_PIXELS    13  // NeoPixel data pin
 #define DEFAULT_PIN_HL        -1  // High/Low pin for the radio module. -1 means not used.
+#endif
 #define DEFAULT_VOLUME         8  // Default SA8x8 module audio volume
 
 #define DEFAULT_ADC_BIAS_VOLTAGE     1.75

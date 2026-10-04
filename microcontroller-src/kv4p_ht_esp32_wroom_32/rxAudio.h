@@ -20,7 +20,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <AudioTools.h>
 #include <AudioTools/AudioCodecs/CodecADPCM.h>
+#include <esp_adc/adc_oneshot.h>
+#if CONFIG_IDF_TARGET_ESP32
 #include <driver/dac.h>
+#endif
 #include <esp_task_wdt.h>
 #include <AfskDemodulator.h>
 #include <FreeDv2400b.h>
@@ -181,7 +184,11 @@ AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
 // The ESP32 ADC/I2S clock was measured about 400 samples/s slow. Request the
 // nominal 48 kHz rate plus that correction so the captured stream is near
 // 48 kHz in real time; the DSP and wire formats remain 48 kHz.
+#if CONFIG_IDF_TARGET_ESP32
 static const uint32_t RX_ADC_SAMPLE_RATE_CORRECTION = 400;
+#else
+static const uint32_t RX_ADC_SAMPLE_RATE_CORRECTION = 0;
+#endif
 static const uint32_t RX_ADC_SAMPLE_RATE =
     AUDIO_SAMPLE_RATE + RX_ADC_SAMPLE_RATE_CORRECTION;
 AudioInfo rxAudioInfo(AUDIO_WIRE_SAMPLE_RATE, 1, 16);
@@ -200,12 +207,16 @@ FreeDvTapEffect freeDvTapEffect;
 SoftSquelchEffect softSquelchEffect(AUDIO_SAMPLE_RATE, ZCR_DECAY_TIME, SQ_CLOSE_DELAY);
 
 inline void injectADCBias() {
+#if CONFIG_IDF_TARGET_ESP32
   dac_output_enable(DAC_CHANNEL_2);  // GPIO26 (DAC1)
   dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * hw.adcBias);
+#endif
 } 
 
 inline void setUpADCAttenuator() {
+#if CONFIG_IDF_TARGET_ESP32
   adc1_config_channel_atten(I2S_ADC_CHANNEL, hw.adcAttenuation);
+#endif
 }
 
 void initI2SRx() {
@@ -218,9 +229,13 @@ void initI2SRx() {
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
+  config.adc_calibration_active = false;
+  config.adc_attenuation = hw.adcAttenuation;
+  ESP_ERROR_CHECK(adc_oneshot_io_to_channel(hw.pins.pinAudioIn,
+    &config.adc_unit, &config.adc_channels[0]));
+#if CONFIG_IDF_TARGET_ESP32
   config.use_apll = true;
-  config.auto_clear = false;
-  config.adc_pin = hw.pins.pinAudioIn;
+#endif
   config.sample_rate = RX_ADC_SAMPLE_RATE;
   in.begin(config);
   // effects

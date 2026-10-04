@@ -73,7 +73,7 @@ public:
     uint16_t connMaxInterval = 12;
     uint16_t connLatency = 0;
     uint16_t connTimeout = 400;
-    esp_power_level_t txPower = ESP_PWR_LVL_P7;
+    esp_power_level_t txPower = ESP_PWR_LVL_P9;
   };
 
   struct Stats {
@@ -139,12 +139,14 @@ public:
       return false;
     }
 
+#if defined(CONFIG_BLUEDROID_ENABLED)
     _notifyDescriptor = new BLE2902();
     if (_notifyDescriptor == nullptr) {
       instanceSlot() = nullptr;
       return false;
     }
     _rxChar->addDescriptor(_notifyDescriptor);
+#endif
     _rxChar->setCallbacks(&_rxCallbacks);
     _txChar->setCallbacks(&_txCallbacks);
 
@@ -366,6 +368,7 @@ private:
 
   class InternalServerCallbacks : public BLEServerCallbacks {
   public:
+#if defined(CONFIG_BLUEDROID_ENABLED)
     void onConnect(BLEServer *server, esp_ble_gatts_cb_param_t *param) override {
       (void)server;
       if (instanceSlot() != nullptr) {
@@ -386,10 +389,22 @@ private:
         instanceSlot()->handleMtuChange(param->mtu.mtu);
       }
     }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+    void onConnect(BLEServer *, ble_gap_conn_desc *desc) override {
+      if (instanceSlot() != nullptr) instanceSlot()->handleConnect(desc);
+    }
+    void onDisconnect(BLEServer *, ble_gap_conn_desc *desc) override {
+      if (instanceSlot() != nullptr) instanceSlot()->handleDisconnect(desc);
+    }
+    void onMtuChanged(BLEServer *, ble_gap_conn_desc *, uint16_t mtu) override {
+      if (instanceSlot() != nullptr) instanceSlot()->handleMtuChange(mtu);
+    }
+#endif
   };
 
   class InternalTxCallbacks : public BLECharacteristicCallbacks {
   public:
+#if defined(CONFIG_BLUEDROID_ENABLED)
     void onWrite(BLECharacteristic *c, esp_ble_gatts_cb_param_t *param) override {
       if (instanceSlot() == nullptr || c == nullptr) {
         return;
@@ -400,16 +415,31 @@ private:
         return;
       }
 
-      const std::string value = c->getValue();
-      if (!value.empty()) {
+      const String value = c->getValue();
+      if (!value.isEmpty()) {
         instanceSlot()->enqueueIncomingBytes(
-            reinterpret_cast<const uint8_t *>(value.data()), value.size());
+            reinterpret_cast<const uint8_t *>(value.c_str()), value.length());
       }
     }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+    void onWrite(BLECharacteristic *c, ble_gap_conn_desc *) override {
+      if (instanceSlot() == nullptr || c == nullptr) return;
+      const String value = c->getValue();
+      if (!value.isEmpty()) {
+        instanceSlot()->enqueueIncomingBytes(
+            reinterpret_cast<const uint8_t *>(value.c_str()), value.length());
+      }
+    }
+#endif
   };
 
   class InternalRxCallbacks : public BLECharacteristicCallbacks {
   public:
+#if defined(CONFIG_NIMBLE_ENABLED)
+    void onSubscribe(BLECharacteristic *, ble_gap_conn_desc *, uint16_t subValue) override {
+      if (instanceSlot() != nullptr) instanceSlot()->_notifySubscribed = (subValue & 1) != 0;
+    }
+#endif
     void onStatus(BLECharacteristic *c, Status s, uint32_t code) override {
       (void)c;
       (void)code;
@@ -587,19 +617,23 @@ private:
   }
 
   bool refreshNotifySubscribed() {
+#if defined(CONFIG_BLUEDROID_ENABLED)
     bool subscribed = (_notifyDescriptor != nullptr && _notifyDescriptor->getNotifications());
     if (subscribed != _notifySubscribed) {
       _LOGI("BLE KISS notify subscription %s", subscribed ? "enabled" : "disabled");
     }
     _notifySubscribed = subscribed;
+#endif
     return _notifySubscribed;
   }
 
   void resetNotifyDescriptor() {
+#if defined(CONFIG_BLUEDROID_ENABLED)
     if (_notifyDescriptor != nullptr) {
       _notifyDescriptor->setNotifications(false);
       _notifyDescriptor->setIndications(false);
     }
+#endif
   }
 
   bool flushOneOutgoingChunk() {
@@ -682,6 +716,7 @@ private:
     return true;
   }
 
+#if defined(CONFIG_BLUEDROID_ENABLED)
   void handleConnect(esp_ble_gatts_cb_param_t *param) {
     _connected = true;
     _notifySubscribed = false;
@@ -723,6 +758,31 @@ private:
       startAdvertising();
     }
   }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  void handleConnect(ble_gap_conn_desc *desc) {
+    _connected = true;
+    _notifySubscribed = false;
+    _mtu = 23;
+    _connectedAtMs = millis();
+    _lastNotifyAttemptMs = 0;
+    _notifyBackoffUntilMs = 0;
+    _lastNotifySucceeded = false;
+    _lastNotifyStatusSeen = false;
+    if (_server != nullptr && desc != nullptr) {
+      _connId = desc->conn_handle;
+      _hasConnId = true;
+      _server->updateConnParams(_connId, _config.connMinInterval,
+          _config.connMaxInterval, _config.connLatency, _config.connTimeout);
+    }
+  }
+
+  void handleDisconnect(ble_gap_conn_desc *) {
+    resetConnectionState();
+    clearIncomingStream();
+    clearQueue();
+    if (_config.restartAdvertisingOnDisconnect) startAdvertising();
+  }
+#endif
 
   void handleMtuChange(uint16_t mtu) {
     _mtu = (mtu < 23) ? 23 : mtu;
