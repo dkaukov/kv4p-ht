@@ -173,7 +173,7 @@ public class RadioAudioService extends Service {
     @Setter
     private APRSIconType aprsPositionIcon = APRSIconType.T_PHONE;
 
-    public enum RadioModuleType {UNKNOWN, VHF, UHF}
+    public enum RadioModuleType {UNKNOWN, VHF, UHF, DUAL}
 
     // === Audio / 4-bit IMA ADPCM Handling ===
     private final short[] pcm16 = new short[AUDIO_FRAME_SAMPLES];
@@ -839,6 +839,12 @@ public class RadioAudioService extends Service {
      */
     private boolean canTransmitOnFrequency(float freq) {
         final float halfBandwidth = radioModule.getHalfBandwidthMhz();
+        if (getRadioType() == RadioModuleType.DUAL) {
+            return (freq >= Math.max(min2mTxFreq, 134.0f) + halfBandwidth
+                    && freq <= Math.min(max2mTxFreq, 174.0f) - halfBandwidth)
+                || (freq >= Math.max(min70cmTxFreq, 400.0f) + halfBandwidth
+                    && freq <= Math.min(max70cmTxFreq, 470.0f) - halfBandwidth);
+        }
         return  (freq >= (minTxFreq + halfBandwidth)) && (freq <= (maxTxFreq - halfBandwidth));
     }
 
@@ -886,7 +892,11 @@ public class RadioAudioService extends Service {
             while (freq > 500.0f) {
                 freq /= 10;
             }
-            return formatFreq(Math.max(getMinRadioFreq(), Math.min(freq, getMaxRadioFreq())));
+            float safe = Math.max(getMinRadioFreq(), Math.min(freq, getMaxRadioFreq()));
+            if (getRadioType() == RadioModuleType.DUAL && safe > 174.0f && safe < 400.0f) {
+                safe = safe < 287.0f ? 174.0f : 400.0f;
+            }
+            return formatFreq(safe);
         } catch (NumberFormatException e) {
             return formatFreq(minTxFreq);
         }
@@ -935,7 +945,7 @@ public class RadioAudioService extends Service {
 
     private String getTxFreq(String txFreq, int offset, int khz) {
         if (offset == ChannelMemory.OFFSET_NONE) {
-            return txFreq;
+            return makeSafeHamFreq(txFreq);
         } else {
             float freqFloat = Float.parseFloat(txFreq);
             if (offset == ChannelMemory.OFFSET_UP) {
@@ -1492,6 +1502,9 @@ public class RadioAudioService extends Service {
         if (Protocol.RfModuleType.RF_SA818_VHF.equals(rfModuleType)) {
             return RadioModuleType.VHF;
         }
+        if (Protocol.RfModuleType.RF_SA518_DUAL.equals(rfModuleType)) {
+            return RadioModuleType.DUAL;
+        }
         return RadioModuleType.UNKNOWN;
     }
 
@@ -1512,6 +1525,9 @@ public class RadioAudioService extends Service {
             setMaxTxFreq(max2mTxFreq);
         } else if (RadioModuleType.UHF.equals(getRadioType())) {
             setMinTxFreq(min70cmTxFreq);
+            setMaxTxFreq(max70cmTxFreq);
+        } else if (RadioModuleType.DUAL.equals(getRadioType())) {
+            setMinTxFreq(min2mTxFreq);
             setMaxTxFreq(max70cmTxFreq);
         }
         Log.d(TAG, "Radio type set to: " + getRadioType());
@@ -1665,7 +1681,8 @@ public class RadioAudioService extends Service {
             Log.d(TAG, "Memory with id " + candidate.memoryId + " had invalid frequency.");
             return false;
         }
-        if (candidate.skipDuringScan || frequency < getMinRadioFreq() || frequency > getMaxRadioFreq()) {
+        if (candidate.skipDuringScan || frequency < getMinRadioFreq() || frequency > getMaxRadioFreq()
+            || (getRadioType() == RadioModuleType.DUAL && frequency > 174.0f && frequency < 400.0f)) {
             return false;
         }
         int desiredSquelch = scanBaseSquelch >= 0 ? scanBaseSquelch : radioModule.getDesiredSquelch();

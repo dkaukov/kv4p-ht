@@ -139,22 +139,7 @@ You can use either Platform IO or Arduino IDE as your build environment.
 
 ### Install Required Libraries
 
-1. Install DRA818:**
-
-   > **Note:** The version of the DRA818 library available through the Arduino Library Manager is currently broken. To ensure proper functionality, you need to install it manually from the official GitHub release.
-
-   - **Download the DRA818 Library ZIP:**
-     - Visit this [commit of the DRA818 v1.0.1 library](https://github.com/fatpat/arduino-dra818.git#89582e3ef7bf3f31f1af149e32cec16c4b9e4cf2). It contains additional definitions needed for the `SA818_VHF` and `SA818_UHF` radio modules.
-     - Click the green `Code` button and then `Download ZIP`.
-
-   - **Add the DRA818 Library to Arduino IDE:**
-     - Open the Arduino IDE.
-     - Go to `Sketch` > `Include Library` > `Add .ZIP Library...`.
-     - In the file dialog, navigate to the location where you downloaded the `arduino-dra818-master.zip` file.
-     - Select the ZIP file and click **Open**.
-     - A confirmation message should appear indicating that the library was added successfully.
-
-2. **Install AudioTools:**
+1. **Install AudioTools:**
 
    - **Download the AudioTools Library ZIP:**
      - Visit the [AudioTools v1.2.3 Release Page](https://github.com/pschatzmann/arduino-audio-tools/releases/tag/v1.2.3).
@@ -167,7 +152,7 @@ You can use either Platform IO or Arduino IDE as your build environment.
      - Select the ZIP file and click **Open**.
      - A confirmation message should appear indicating that the library was added successfully.
 
-3. **Install adpcm:**
+2. **Install adpcm:**
 
    - **Download the adpcm Library ZIP:**
      - Visit the [adpcm v1.2.1 Release Page](https://github.com/pschatzmann/adpcm/releases/tag/v1.2.1).
@@ -180,16 +165,16 @@ You can use either Platform IO or Arduino IDE as your build environment.
      - Select the ZIP file and click **Open**.
      - A confirmation message should appear indicating that the library was added successfully.
 
-4. **Install esp32-afsk:**
+3. **Install esp32-afsk:**
 
    - Navigate to `Sketch` > `Include Library` > `Manage Libraries`.
    - In the **Library Manager** window, enter **"esp32-afsk"** into the search bar.
    - Locate the **esp32-afsk** library by **Dmitry Kaukov** in the search results.
    - Click the **Install** button to add the library to your Arduino environment.
 
-5. **Confirm All Libraries Are Installed:**
+4. **Confirm All Libraries Are Installed:**
 
-   - After completing the above steps, go to `Sketch` > `Include Library` and scroll down to the bottom where you will find the section labeled `Contributed Libraries` (light gray). Ensure that **adpcm**, **audio-tools**,  **DRA818** and **esp32-afk** are listed.
+   - After completing the above steps, go to `Sketch` > `Include Library` and scroll down to the bottom where you will find the section labeled `Contributed Libraries` (light gray). Ensure that **adpcm**, **audio-tools**, and **esp32-afsk** are listed.
    - If any libraries are missing, revisit the installation steps to ensure they were added correctly.
 
 ### Opening the Project (Arduino IDE)
@@ -220,6 +205,8 @@ You can use either Platform IO or Arduino IDE as your build environment.
    - Monitor the output pane for upload progress and confirmation of success.
 
 ## Additional Notes
+
+- **Radio module selection:** The `hwconfig` NVS key `RF_MODULE_TYPE` uses `0` for SA818 VHF, `1` for SA818 UHF, and `2` for SA518 dual band. ESP32-S3 defaults to SA518; classic ESP32 defaults to SA818 VHF. SA518 accepts 134–174 MHz and 400–470 MHz. The firmware handles radio commands through `radioModule.h` in the main loop, so no DRA818 library is required.
 
 - **Consistent Project Structure:**
   - Ensure that any changes made in one environment (e.g., library installations, code modifications) are compatible with the other to maintain consistency across both build systems.

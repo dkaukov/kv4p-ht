@@ -22,7 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <AudioTools/AudioCodecs/CodecADPCM.h>
 #include <esp_adc/adc_oneshot.h>
 #if CONFIG_IDF_TARGET_ESP32
-#include <driver/dac.h>
+#include <driver/dac_oneshot.h>
 #endif
 #include <esp_task_wdt.h>
 #include <AfskDemodulator.h>
@@ -208,14 +208,15 @@ SoftSquelchEffect softSquelchEffect(AUDIO_SAMPLE_RATE, ZCR_DECAY_TIME, SQ_CLOSE_
 
 inline void injectADCBias() {
 #if CONFIG_IDF_TARGET_ESP32
-  dac_output_enable(DAC_CHANNEL_2);  // GPIO26 (DAC1)
-  dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * hw.adcBias);
-#endif
-} 
-
-inline void setUpADCAttenuator() {
-#if CONFIG_IDF_TARGET_ESP32
-  adc1_config_channel_atten(I2S_ADC_CHANNEL, hw.adcAttenuation);
+  // The audio stack uses ESP-IDF's new DAC driver. Keep the bias channel
+  // allocated across RX/TX transitions; the legacy driver cannot coexist.
+  static dac_oneshot_handle_t biasChannel = nullptr;
+  if (biasChannel == nullptr) {
+    dac_oneshot_config_t config = {.chan_id = DAC_CHAN_1}; // GPIO26
+    ESP_ERROR_CHECK(dac_oneshot_new_channel(&config, &biasChannel));
+  }
+  ESP_ERROR_CHECK(dac_oneshot_output_voltage(biasChannel,
+    (uint8_t)((255.0f / 3.3f) * constrain(hw.adcBias, 0.0f, 3.3f))));
 #endif
 }
 
@@ -224,7 +225,6 @@ void initI2SRx() {
     return;
   }
   injectADCBias();
-  setUpADCAttenuator();
   //AudioToolsLogger.begin(debugPrinter, AudioToolsLogLevel::Debug);
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
@@ -241,14 +241,20 @@ void initI2SRx() {
   // effects
   effects.clear();
   afskTapEffect.setActive(true);
-  effects.addEffect(dcOffsetRemover);
-  effects.addEffect(gain);
-  effects.addEffect(afskTapEffect);
   freeDvTapEffect.setActive(true);
-  effects.addEffect(freeDvTapEffect);
-  effects.addEffect(softSquelchEffect);
-  effects.addEffect(mute);
-  effects.begin(rxInfo);
+  if (!effects.begin(rxInfo)) {
+    _LOGE("RX effects initialization failed");
+    in.end();
+    return;
+  }
+  // AudioTools 1.2.6 clones template effects at begin(). Attach our stateful
+  // mono effects directly so runtime updates reach the processing chain.
+  effects.addEffect(0, dcOffsetRemover);
+  effects.addEffect(0, gain);
+  effects.addEffect(0, afskTapEffect);
+  effects.addEffect(0, freeDvTapEffect);
+  effects.addEffect(0, softSquelchEffect);
+  effects.addEffect(0, mute);
   // open output
   rxDownsample.begin();
   rxOut.begin(rxAudioInfo);

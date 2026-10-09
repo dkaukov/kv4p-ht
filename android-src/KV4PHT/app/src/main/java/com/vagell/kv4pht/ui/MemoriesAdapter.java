@@ -44,6 +44,7 @@ public class MemoriesAdapter extends RecyclerView.Adapter<MemoriesAdapter.Memory
     private MemoryListener memoryListener;
     private String groupFilter = null;
     private boolean bandFilterEnabled = false;
+    private boolean dualBandFilter = false;
     private float minRadioFreq = 0.0f;
     private float maxRadioFreq = 999.0f;
 
@@ -81,13 +82,21 @@ public class MemoriesAdapter extends RecyclerView.Adapter<MemoriesAdapter.Memory
 
     public void clearBandFilter() {
         this.bandFilterEnabled = false;
+        this.dualBandFilter = false;
         applyFilters();
     }
 
     public void setBandFilter(float minRadioFreq, float maxRadioFreq) {
         this.bandFilterEnabled = true;
+        this.dualBandFilter = false;
         this.minRadioFreq = minRadioFreq;
         this.maxRadioFreq = maxRadioFreq;
+        applyFilters();
+    }
+
+    public void setDualBandFilter() {
+        this.bandFilterEnabled = true;
+        this.dualBandFilter = true;
         applyFilters();
     }
 
@@ -112,6 +121,10 @@ public class MemoriesAdapter extends RecyclerView.Adapter<MemoriesAdapter.Memory
     }
 
     private boolean frequencyFitsBand(float frequency) {
+        if (dualBandFilter) {
+            return (frequency >= 134.0f && frequency <= 174.0f)
+                || (frequency >= 400.0f && frequency <= 470.0f);
+        }
         return frequency >= minRadioFreq && frequency <= maxRadioFreq;
     }
 

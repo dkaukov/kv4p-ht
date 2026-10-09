@@ -20,5 +20,6 @@ through GPIO21 by the existing NeoPixel status code. The pin defaults are:
 GPIO3, GPIO10, GPIO12, and GPIO13 are unused; GPIO19 and GPIO20 are reserved
 for USB. The S3 has no DAC, so the board provides ADC bias through SJ1. RSSI
 is queried over UART (the module's `RSSI?` command) and has no dedicated GPIO.
-The extension headers were removed. Classic Bluetooth SPP is available only on the original
-ESP32; the S3 variant offers USB CDC and BLE.
+The extension headers were removed. Both firmware variants use USB and BLE;
+Classic Bluetooth SPP is no longer started on the original ESP32.
+Both ESP32 variants use NimBLE-Arduino for BLE.

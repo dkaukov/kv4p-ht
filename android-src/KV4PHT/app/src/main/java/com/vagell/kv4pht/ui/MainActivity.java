@@ -220,7 +220,7 @@ public class MainActivity extends AppCompatActivity {
                 Intent intent = new Intent("com.vagell.kv4pht.EDIT_MEMORY_ACTION");
                 intent.putExtra(EXTRA_REQUEST_CODE, REQUEST_EDIT_MEMORY);
                 intent.putExtra(EXTRA_MEMORY_ID, memory.memoryId);
-                intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType() == RadioAudioService.RadioModuleType.VHF));
+                intent.putExtra("isVhfRadio", isVhfForFrequency(memory.frequency));
                 startActivityForResult(intent, REQUEST_EDIT_MEMORY);
             }
         });
@@ -324,6 +324,8 @@ public class MainActivity extends AppCompatActivity {
                         showBand(BandType.BAND_VHF);
                     } else if (radioType.equals(RadioAudioService.RadioModuleType.UHF)) {
                         showBand(BandType.BAND_UHF);
+                    } else if (radioType.equals(RadioAudioService.RadioModuleType.DUAL)) {
+                        showBand(BandType.BAND_DUAL);
                     } else {
                         showBand(BandType.BAND_UNKNOWN);
                     }
@@ -1297,6 +1299,8 @@ public class MainActivity extends AppCompatActivity {
         }
         if (radioAudioService == null || RadioAudioService.RadioModuleType.UNKNOWN.equals(radioAudioService.getRadioType())) {
             memoriesAdapter.clearBandFilter();
+        } else if (RadioAudioService.RadioModuleType.DUAL.equals(radioAudioService.getRadioType())) {
+            memoriesAdapter.setDualBandFilter();
         } else {
             memoriesAdapter.setBandFilter(radioAudioService.getMinRadioFreq(), radioAudioService.getMaxRadioFreq());
         }
@@ -1331,7 +1335,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public enum BandType {
-        BAND_VHF, BAND_UHF, BAND_UNKNOWN
+        BAND_VHF, BAND_UHF, BAND_DUAL, BAND_UNKNOWN
     }
 
     @SuppressWarnings("java:S3398")
@@ -1346,6 +1350,10 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 case BAND_UHF:
                     bandField.setText(getString(R.string.uhf));
+                    bandField.setVisibility(View.VISIBLE);
+                    break;
+                case BAND_DUAL:
+                    bandField.setText(getString(R.string.vhf) + " / " + getString(R.string.uhf));
                     bandField.setVisibility(View.VISIBLE);
                     break;
                 default:
@@ -1591,9 +1599,20 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra(EXTRA_REQUEST_CODE, REQUEST_ADD_MEMORY);
         intent.putExtra("activeFrequencyStr", activeFrequencyStr);
         intent.putExtra("selectedMemoryGroup", selectedMemoryGroup);
-        intent.putExtra("isVhfRadio", (radioAudioService != null && radioAudioService.getRadioType().equals(RadioAudioService.RadioModuleType.VHF)));
+        intent.putExtra("isVhfRadio", isVhfForFrequency(activeFrequencyStr));
 
         startActivityForResult(intent, REQUEST_ADD_MEMORY);
+    }
+
+    private boolean isVhfForFrequency(String frequency) {
+        if (radioAudioService == null) return false;
+        if (radioAudioService.getRadioType() == RadioAudioService.RadioModuleType.VHF) return true;
+        if (radioAudioService.getRadioType() != RadioAudioService.RadioModuleType.DUAL || frequency == null) return false;
+        try {
+            return Float.parseFloat(frequency) < 200.0f;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     public void groupSelectorClicked(View view) {

@@ -139,12 +139,6 @@ ProtocolSession protocolUsbSession = {
   .flags = 0,
   .windowSize = 0,
 };
-ProtocolSession protocolBtSession = {
-  .stream = nullptr,
-  .connected = false,
-  .flags = 0,
-  .windowSize = 0,
-};
 ProtocolSession protocolBleSession = {
   .stream = nullptr,
   .connected = false,
@@ -152,17 +146,12 @@ ProtocolSession protocolBleSession = {
   .windowSize = 0,
 };
 
-bool protocolHasBtSession() {
-  return protocolSessionConnected(protocolBtSession);
-}
-
 bool protocolHasBleSession() {
   return protocolSessionConnected(protocolBleSession);
 }
 
 bool protocolAnySessionFlag(uint16_t flag) {
   return (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & flag))
-    || (protocolHasBtSession() && (protocolBtSession.flags & flag))
     || (protocolHasBleSession() && (protocolBleSession.flags & flag));
 }
 
@@ -296,9 +285,6 @@ void inline sendKissDataFrame(Stream &out, const uint8_t *ax25, size_t len) {
 
 void inline sendKissDataFrame(const uint8_t *ax25, size_t len) {
   sendKissDataFrame(Serial, ax25, len);
-  if (protocolHasBtSession()) {
-    sendKissDataFrame(*protocolBtSession.stream, ax25, len);
-  }
   if (protocolHasBleSession()) {
     sendKissDataFrame(*protocolBleSession.stream, ax25, len);
   }
@@ -326,9 +312,6 @@ void sendKv4pVendorFrame(Stream &out, uint8_t kv4pCommand, const uint8_t *payloa
 
 void inline sendKv4pVendorFrame(uint8_t kv4pCommand, const uint8_t *payload, size_t len) {
   sendKv4pVendorFrame(Serial, kv4pCommand, payload, len);
-  if (protocolHasBtSession()) {
-    sendKv4pVendorFrame(*protocolBtSession.stream, kv4pCommand, payload, len);
-  }
   if (protocolHasBleSession()) {
     sendKv4pVendorFrame(*protocolBleSession.stream, kv4pCommand, payload, len);
   }
@@ -360,9 +343,6 @@ void inline sendDeviceState(Stream &out, const DeviceState &state) {
 
 void inline sendDeviceState(const DeviceState &state) {
   sendDeviceState(Serial, state);
-  if (protocolHasBtSession()) {
-    sendDeviceState(*protocolBtSession.stream, state);
-  }
   if (protocolHasBleSession()) {
     sendDeviceState(*protocolBleSession.stream, state);
   }
@@ -373,9 +353,6 @@ void inline sendAudio(const uint8_t *data, size_t len) {
   if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolUsbSession.stream, COMMAND_RX_AUDIO, data, len);
   }
-  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
-    sendKv4pVendorFrame(*protocolBtSession.stream, COMMAND_RX_AUDIO, data, len);
-  }
   if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBleSession.stream, COMMAND_RX_AUDIO, data, len);
   }
@@ -385,9 +362,6 @@ void inline sendDigitalFrame(const uint8_t *data, size_t len) {
   if (!freeDv2400bEnabled() || len != 7) return;
   if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolUsbSession.stream, COMMAND_RX_DIGITAL, data, len);
-  }
-  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
-    sendKv4pVendorFrame(*protocolBtSession.stream, COMMAND_RX_DIGITAL, data, len);
   }
   if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_RX_AUDIO_OPEN)) {
     sendKv4pVendorFrame(*protocolBleSession.stream, COMMAND_RX_DIGITAL, data, len);

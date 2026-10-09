@@ -68,6 +68,20 @@ public class RadioAudioServiceTest {
         }
     }
 
+    @Test public void dualBandAllowsBothHamBandsAndClampsUnsupportedGap() {
+        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 470f);
+        assertEquals(RadioAudioService.RadioModuleType.DUAL, service.getRadioType());
+        assertEquals("174.0000", service.validateFrequency("200"));
+        assertEquals("400.0000", service.validateFrequency("390"));
+        service.setMode(RadioMode.RX);
+        service.tuneToFreq("146.5200");
+        assertTrue(service.isTxAllowed());
+        service.tuneToFreq("435.0000");
+        assertTrue(service.isTxAllowed());
+        service.tuneToFreq("400.0000");
+        assertFalse(service.isTxAllowed());
+    }
+
     @Test public void startupRejectsTuningUntilInitializationFinishes() {
         service.tuneToFreq("146.5200");
         service.tuneToMemory(memory(1, "146.5200"));
@@ -128,6 +142,17 @@ public class RadioAudioServiceTest {
         service.setScanning(true);
         assertEquals("146.5200", service.getActiveFrequencyStr());
         service.setScanning(false);
+    }
+
+    @Test public void dualBandScanSkipsFrequenciesBetweenBands() {
+        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 470f);
+        service.setChannelMemories(new MutableLiveData<>(List.of(
+            memory(1, "200.0000"), memory(2, "435.0000"), memory(3, "146.5200"))));
+        service.setMode(RadioMode.RX);
+        service.setScanning(true);
+        assertEquals("435.0000", service.getActiveFrequencyStr());
+        service.nextScan();
+        assertEquals("146.5200", service.getActiveFrequencyStr());
     }
 
     @Test public void disconnectedServiceRejectsFlashingAndUnsupportedDigitalMode() {

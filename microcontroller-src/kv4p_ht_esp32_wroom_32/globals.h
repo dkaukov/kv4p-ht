@@ -18,12 +18,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <Arduino.h>
-#include <driver/adc.h>
+#include <hal/adc_types.h>
 
-// RF module types
+// Stored in hardware-config NVS and sent in HELLO; keep these values stable.
 enum RfModuleType : uint8_t {
   RF_SA818_VHF = 0,
   RF_SA818_UHF = 1,
+  RF_SA518_DUAL = 2,
 };
 
 // Firmware audio hardware stays at 48 kHz. Audio frames on USB are 16 kHz 4-bit ADPCM.
@@ -72,10 +73,6 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 // But if this is set too high, then we get audio skips instead of underruns. So there's a sweet spot.
 #define SAMPLING_RATE_OFFSET 0
 
-// I2S audio sampling stuff
-#define I2S_ADC_UNIT    ADC_UNIT_1
-#define I2S_ADC_CHANNEL ADC1_CHANNEL_6
-
 // Connections to radio module
 #if CONFIG_IDF_TARGET_ESP32S3
 // ESP32-S3-Zero wiring. GPIO19/20 are reserved for native USB.
@@ -96,7 +93,7 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 #define DEFAULT_PIN_RF_RXD    16
 #define DEFAULT_PIN_RF_TXD    17
 #define DEFAULT_PIN_AUDIO_OUT 25  // This constant not used, just here for reference. GPIO 25 is implied by use of I2S_DAC_CHANNEL_RIGHT_EN.
-#define DEFAULT_PIN_AUDIO_IN  34  // If this is changed, you may need to manually edit adc1_config_channel_atten() below too.
+#define DEFAULT_PIN_AUDIO_IN  34
 #define DEFAULT_PIN_PTT       18  // Keys up the radio module
 #define DEFAULT_PIN_PD        19
 #define DEFAULT_PIN_SQ        32  //
@@ -110,7 +107,11 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 
 #define DEFAULT_ADC_BIAS_VOLTAGE     1.75
 #define DEFAULT_ADC_ATTENUATION      ADC_ATTEN_DB_12
+#if CONFIG_IDF_TARGET_ESP32S3
+#define DEFAULT_RF_MODULE_TYPE       RF_SA518_DUAL
+#else
 #define DEFAULT_RF_MODULE_TYPE       RF_SA818_VHF
+#endif
 #define DEFAULT_VOLUME               8
 #define DEFAULT_STOPPED_COLOR        {0, 32, 0}
 

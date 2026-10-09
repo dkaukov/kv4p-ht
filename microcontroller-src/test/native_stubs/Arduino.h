@@ -27,9 +27,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define PI 3.14159265358979323846f
 #endif
 
-inline unsigned long millis() {
-  return 0;
-}
+inline unsigned long nativeTestMillis = 0;
+inline unsigned long millis() { return nativeTestMillis; }
+inline void delay(unsigned long ms) { nativeTestMillis += ms; }
 
 class NativeEsp {
 public:

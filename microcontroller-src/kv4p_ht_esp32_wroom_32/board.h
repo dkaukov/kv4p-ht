@@ -69,7 +69,8 @@ void loadHardwareConfig() {
   hw.adcBias               = prefs.getString("ADC_BIAS", TOSTRING(DEFAULT_ADC_BIAS_VOLTAGE)).toFloat();
   prefs.getBytes("STOPPED_COLOR", &hw.stoppedColor, sizeof(RGBColor));
   hw.volume                = prefs.getUChar("VOLUME",       DEFAULT_VOLUME);
-  hw.rfModuleType          = (RfModuleType) prefs.getUChar("RF_MODULE_TYPE", DEFAULT_RF_MODULE_TYPE);
+  uint8_t moduleType       = prefs.getUChar("RF_MODULE_TYPE", DEFAULT_RF_MODULE_TYPE);
+  hw.rfModuleType          = moduleType <= RF_SA518_DUAL ? (RfModuleType) moduleType : DEFAULT_RF_MODULE_TYPE;
   prefs.end();
 }
 

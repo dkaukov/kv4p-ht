@@ -17,13 +17,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <Arduino.h>
-#if CONFIG_IDF_TARGET_ESP32
-#include <BluetoothSerial.h>
-#endif
-#include <DRA818.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include "globals.h"
+#include "radioModule.h"
 #include "debug.h"
 #include "BluedroidBleKissGattStream.h"
 #include "led.h"
@@ -56,22 +53,20 @@ Kv4pBleKissStream::Config bleKissConfig() {
   cfg.minNotifyIntervalMs = 0;
   cfg.notifyFailureBackoffMs = 25;
   cfg.writeQueueWaitMs = 15;
-  cfg.txPower = ESP_PWR_LVL_P9;
+  cfg.txPower = 9;
   return cfg;
 }
 
-DRA818 sa818_vhf(&Serial1, SA818_VHF);
-DRA818 sa818_uhf(&Serial1, SA818_UHF);
-DRA818 &sa818 = sa818_vhf;
-#if CONFIG_IDF_TARGET_ESP32
-BluetoothSerial SerialBT;
-#endif
+void handleRadioResult(const RadioModule::Result &result);
+RadioModule radio(Serial1, handleRadioResult);
+bool radioFound = false;
+bool normalRadioConfigured = false;
+bool radioFilterPending = false;
+bool radioGroupPending = false;
+HostDesiredState pendingRadioState = {};
+uint16_t pendingFilterFlags = 0;
 Kv4pBleKissStream bleKissStream(bleKissConfig());
-bool bluetoothStarted = false;
-bool bluetoothProtocolConnected = false;
 bool bleKissProtocolConnected = false;
-KissParser bluetoothParser(protocolBtSession, &handleCommands, &handleAx25Data,
-  &handleKissParameter);
 KissParser bleKissParser(protocolBleSession, &handleCommands, &handleAx25Data,
   &handleKissParameter);
 Ax25TxScheduler ax25TxScheduler;
@@ -79,14 +74,20 @@ Ax25TxScheduler ax25TxScheduler;
 // HF-noise carrier decision is reliable. Keep a small loop-timing margin.
 static constexpr uint16_t AX25_OVERRIDE_RX_SETTLE_MS = 260;
 bool ax25OverrideChannelPrepared = false;
+bool ax25OverrideInProgress = false;
 uint32_t ax25OverrideChannelReadyAt = 0;
+
+char radioStatus() {
+  return radioFound ? RADIO_MODULE_FOUND : RADIO_MODULE_NOT_FOUND;
+}
 
 float moduleMinRadioFreq() {
   return hw.rfModuleType == RF_SA818_UHF ? 400.0f : 134.0f;
 }
 
 float moduleMaxRadioFreq() {
-  return hw.rfModuleType == RF_SA818_UHF ? 480.0f : 174.0f;
+  return hw.rfModuleType == RF_SA818_UHF ? 480.0f :
+    hw.rfModuleType == RF_SA518_DUAL ? 470.0f : 174.0f;
 }
 
 float moduleDefaultRadioFreq() {
@@ -94,11 +95,14 @@ float moduleDefaultRadioFreq() {
 }
 
 float clampModuleRadioFreq(float freq) {
+  if (isModuleRadioFreq(freq)) return freq;
+  if (hw.rfModuleType == RF_SA518_DUAL && freq > 174.0f && freq < 400.0f)
+    return freq < 287.0f ? 174.0f : 400.0f;
   return min(max(freq, moduleMinRadioFreq()), moduleMaxRadioFreq());
 }
 
 bool isModuleRadioFreq(float freq) {
-  return freq >= moduleMinRadioFreq() && freq <= moduleMaxRadioFreq();
+  return RadioModule::validFrequency(hw.rfModuleType, freq);
 }
 
 void loadPersistedRadioState() {
@@ -106,7 +110,7 @@ void loadPersistedRadioState() {
   uint16_t flags = desiredState.flags;
   flags &= ~(HOST_STATE_RADIO_CONFIG_VALID | HOST_STATE_HIGH_POWER | HOST_STATE_RSSI_ENABLED | HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW | HOST_STATE_TX_ALLOWED);
   flags |= HOST_STATE_RADIO_CONFIG_VALID;
-  desiredState.bw = prefs.getUChar("bw", DRA818_25K);
+  desiredState.bw = prefs.getUChar("bw", 1);
   desiredState.freq_tx = prefs.getFloat("freq_tx", moduleDefaultRadioFreq());
   desiredState.freq_rx = prefs.getFloat("freq_rx", moduleDefaultRadioFreq());
   desiredState.ctcss_tx = prefs.getUChar("ctcss_tx", 0);
@@ -243,7 +247,7 @@ DeviceState currentDeviceState(uint16_t sessionFlags = 0) {
     .ctcss_tx = appliedState.ctcss_tx,
     .squelch = appliedState.squelch,
     .ctcss_rx = appliedState.ctcss_rx,
-    .radioModuleStatus = radioModuleStatus,
+    .radioModuleStatus = radioStatus(),
     .mode = deviceMode(),
     .lastError = lastDeviceStateError,
     .latestRssi = latestRssi,
@@ -254,10 +258,6 @@ void sendCurrentDeviceState() {
   bool sent = false;
   if (protocolSessionConnected(protocolUsbSession) && (protocolUsbSession.flags & HOST_STATE_ENABLE_STATUS_REPORTS)) {
     sendDeviceState(*protocolUsbSession.stream, currentDeviceState(protocolUsbSession.flags));
-    sent = true;
-  }
-  if (protocolHasBtSession() && (protocolBtSession.flags & HOST_STATE_ENABLE_STATUS_REPORTS)) {
-    sendDeviceState(*protocolBtSession.stream, currentDeviceState(protocolBtSession.flags));
     sent = true;
   }
   if (protocolHasBleSession() && (protocolBleSession.flags & HOST_STATE_ENABLE_STATUS_REPORTS)) {
@@ -274,7 +274,7 @@ void markDeviceStateDirty() {
 }
 
 bool radioConfigChanged() {
-  return !radioConfigApplied
+  return !normalRadioConfigured
     || appliedState.bw != desiredState.bw
     || appliedState.freq_tx != desiredState.freq_tx
     || appliedState.freq_rx != desiredState.freq_rx
@@ -284,56 +284,18 @@ bool radioConfigChanged() {
     || appliedState.memoryId != desiredState.memoryId;
 }
 
-void drainRadioSerial() {
-  while (Serial1.available()) {
-    Serial1.read();
-  }
-}
-
 void reconcileDesiredState(bool sendReport = true) {
-  lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
   bool wantHigh = desiredState.flags & HOST_STATE_HIGH_POWER;
   if (hw.features.hasHL) {
     digitalWrite(hw.pins.pinHl, wantHigh ? LOW : HIGH);
   }
   rssiOn = desiredState.flags & HOST_STATE_RSSI_ENABLED;
 
-  uint16_t filterFlags = desiredFilterFlags();
-  uint16_t appliedFilterFlags = appliedState.flags & (HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW);
-  if (!filtersApplied || filterFlags != appliedFilterFlags) {
-    drainRadioSerial();
-    while (!sa818.filters((filterFlags & HOST_STATE_FILTER_PRE), false, false)) {
-      lastDeviceStateError = DEVICE_STATE_ERROR_FILTERS_FAILED;
-      esp_task_wdt_reset();
-    }
-    rxDownsample.setFilters((filterFlags & HOST_STATE_FILTER_HIGH) != 0,
-                            (filterFlags & HOST_STATE_FILTER_LOW) != 0);
-    appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | filterFlags;
-    filtersApplied = true;
-  }
-
-  if ((desiredState.flags & HOST_STATE_RADIO_CONFIG_VALID) && radioConfigChanged()) {
-    drainRadioSerial();
-    while (!sa818.group(desiredState.bw, desiredState.freq_tx, desiredState.freq_rx, desiredState.ctcss_tx, 0, 0)) {
-      lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
-      esp_task_wdt_reset();
-    }
-    appliedState.bw = desiredState.bw;
-    appliedState.freq_tx = desiredState.freq_tx;
-    appliedState.freq_rx = desiredState.freq_rx;
-    appliedState.ctcss_tx = desiredState.ctcss_tx;
-    appliedState.squelch = desiredState.squelch;
-    softSquelchEffect.setDeadbandLevel(appliedState.squelch);
-    freeDvSquelch.setLevel(appliedState.squelch);
-    if (freeDv2400bEnabled()) squelched = !freeDvSquelch.open();
-    softSquelchEffect.setCtcssTone(desiredState.ctcss_rx);
-    appliedState.ctcss_rx = desiredState.ctcss_rx;
-    appliedState.memoryId = desiredState.memoryId;
-    appliedState.flags |= HOST_STATE_RADIO_CONFIG_VALID;
-    radioConfigApplied = true;
-  }
-
-  if ((desiredState.flags & HOST_STATE_PTT_REQUESTED) && txAllowedByHost()) {
+  // A pending retune must never leave host-requested PTT keyed on the old channel.
+  if (radioConfigChanged() && mode == MODE_TX) setMode(rxIdleMode());
+  if ((desiredState.flags & HOST_STATE_PTT_REQUESTED) && txAllowedByHost()
+      && (desiredState.flags & HOST_STATE_RADIO_CONFIG_VALID)
+      && !radioConfigChanged()) {
     setMode(MODE_TX);
   } else {
     setMode(rxIdleMode());
@@ -394,17 +356,6 @@ void setup() {
   Serial.println("Use `logcat` or a kv4p decoder to view readable logs.");
   Serial.println("More info: https://github.com/VanceVagell/kv4p-ht/blob/main/microcontroller-src/kv4p_ht_esp32_wroom_32/readme.md");
   Serial.println("==============================");
-#if CONFIG_IDF_TARGET_ESP32
-  char bluetoothDeviceName[12];
-  formatBluetoothDeviceName(bluetoothDeviceName, sizeof(bluetoothDeviceName));
-  bluetoothStarted = SerialBT.begin(bluetoothDeviceName);
-  if (bluetoothStarted) {
-    protocolBtSession.stream = &SerialBT;
-    protocolBtSession.windowSize = USB_BUFFER_SIZE;
-  } else {
-    Serial.println("Classic Bluetooth init failed");
-  }
-#endif
   formatBluetoothDeviceName(bleKissDeviceName, sizeof(bleKissDeviceName));
   protocolBleSession.stream = &bleKissStream;
   protocolBleSession.windowSize = BLE_KISS_WINDOW_SIZE;
@@ -433,7 +384,7 @@ void setup() {
     pinMode(hw.pins.pinHl, OUTPUT);
     digitalWrite(hw.pins.pinHl, LOW);  // High power
   }
-  // Communication with DRA818V radio module via GPIO pins
+  // Communication with the selected radio module via GPIO pins
   Serial1.begin(9600, SERIAL_8N1, hw.pins.pinRfModuleRxd, hw.pins.pinRfModuleTxd);
   Serial1.setTimeout(10);  // Very short so we don't tie up rx audio while reading from radio module (responses are tiny so this is ok)
   //
@@ -444,37 +395,134 @@ void setup() {
   initI2SRx();
   ledSetup();
   initRadio((desiredState.flags & HOST_STATE_HIGH_POWER) != 0);
-  if (radioModuleStatus == RADIO_MODULE_FOUND) {
-    reconcileDesiredState(false);
-  }
-#if !CONFIG_IDF_TARGET_ESP32S3
-  sendHello(protocolUsbSession, FIRMWARE_VER, radioModuleStatus, hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(), currentDeviceState(protocolUsbSession.flags));
-#endif
   _LOGI("Setup is finished");
 }
 
 void initRadio(bool isHigh) {
-  if (hw.rfModuleType == RF_SA818_UHF) {
-    sa818 = sa818_uhf;
-  } else {
-    sa818 = sa818_vhf;
-  }
   if (hw.features.hasHL) {
     digitalWrite(hw.pins.pinHl, isHigh ? LOW : HIGH);
   }
-  radioModuleStatus = RADIO_MODULE_NOT_FOUND;
-  // The sa818.handshake() has 3 retries internally with 2 seconds between each attempt.
-  // We have 3 retries on top of that, so total wait time is up to 20 seconds.
-  // This should allow the radio module to power up and respond.
-  for (int i = 0; i < 3; i++) {
-    esp_task_wdt_reset();
-    if (sa818.handshake()) { //Check if radio responded to handshake attempt
-      radioModuleStatus = RADIO_MODULE_FOUND;
-      sa818.volume(hw.volume);
-      sa818.filters(false, false, false);
-      break;
+  radioFound = radio.begin(hw.rfModuleType, 3);
+  radio.volume(hw.volume);
+}
+
+bool radioHelloReady() {
+  return !radioFound || normalRadioConfigured ||
+    lastDeviceStateError == DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
+}
+
+void handleRadioResult(const RadioModule::Result &result) {
+  uint32_t now = millis();
+  switch (result.command) {
+      case RadioModule::FILTER:
+        radioFilterPending = false;
+        if (result.ok) {
+          lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
+        } else {
+          lastDeviceStateError = DEVICE_STATE_ERROR_FILTERS_FAILED;
+        }
+        // A failed filter command must not prevent channel setup or USB HELLO.
+        appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | pendingFilterFlags;
+        filtersApplied = true;
+        break;
+      case RadioModule::GROUP:
+        radioGroupPending = false;
+        if (result.ok) {
+          normalRadioConfigured = true;
+          appliedState.bw = pendingRadioState.bw;
+          appliedState.freq_tx = pendingRadioState.freq_tx;
+          appliedState.freq_rx = pendingRadioState.freq_rx;
+          appliedState.ctcss_tx = pendingRadioState.ctcss_tx;
+          appliedState.squelch = pendingRadioState.squelch;
+          appliedState.ctcss_rx = pendingRadioState.ctcss_rx;
+          appliedState.memoryId = pendingRadioState.memoryId;
+          appliedState.flags |= HOST_STATE_RADIO_CONFIG_VALID;
+          softSquelchEffect.setDeadbandLevel(appliedState.squelch);
+          freeDvSquelch.setLevel(appliedState.squelch);
+          if (freeDv2400bEnabled()) squelched = !freeDvSquelch.open();
+          softSquelchEffect.setCtcssTone(appliedState.ctcss_rx);
+          if (lastDeviceStateError != DEVICE_STATE_ERROR_FILTERS_FAILED)
+            lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
+        } else {
+          normalRadioConfigured = false;
+          lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
+        }
+        break;
+      case RadioModule::OVERRIDE:
+        ax25OverrideInProgress = false;
+        if (result.ok) {
+          ax25OverrideChannelPrepared = true;
+          ax25OverrideChannelReadyAt = now + AX25_OVERRIDE_RX_SETTLE_MS;
+          lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
+        } else {
+          lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
+        }
+        break;
+      case RadioModule::RSSI:
+        if (result.ok) {
+          static bool rssiResponseLogged = false;
+          if (!rssiResponseLogged) {
+            _LOGI("Radio RSSI response: %d", result.value);
+            rssiResponseLogged = true;
+          }
+          if (latestRssi != result.value) latestRssi = result.value;
+        }
+        break;
+    default: break;
+  }
+  markDeviceStateDirty();
+}
+
+void radioLoop() {
+  radio.loop();
+
+  static bool usbHelloSent = false;
+#if !CONFIG_IDF_TARGET_ESP32S3
+  if (radioHelloReady() && !usbHelloSent) {
+    sendHello(protocolUsbSession, FIRMWARE_VER, radioStatus(), hw.rfModuleType,
+      moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(),
+      currentDeviceState(protocolUsbSession.flags));
+    usbHelloSent = true;
+  }
+#endif
+  if (!radioFound || ax25OverrideChannelPrepared || ax25OverrideInProgress) return;
+
+  uint16_t filterFlags = desiredFilterFlags();
+  uint16_t appliedFilterFlags = appliedState.flags &
+    (HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW);
+  if (!radioFilterPending && (!filtersApplied || filterFlags != appliedFilterFlags)) {
+    rxDownsample.setFilters((filterFlags & HOST_STATE_FILTER_HIGH) != 0,
+                            (filterFlags & HOST_STATE_FILTER_LOW) != 0);
+    if (hw.rfModuleType == RF_SA518_DUAL) {
+      // SA518 V1.2 has no documented SETFILTER command.
+      appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | filterFlags;
+      filtersApplied = true;
+    } else {
+      pendingFilterFlags = filterFlags;
+      radioFilterPending = true;
+      radio.filter((filterFlags & HOST_STATE_FILTER_PRE) != 0);
+      return;
     }
   }
+  if (radioFilterPending) return;
+
+  if (!radioGroupPending && (desiredState.flags & HOST_STATE_RADIO_CONFIG_VALID) && radioConfigChanged()) {
+    if (!isModuleRadioFreq(desiredState.freq_tx) || !isModuleRadioFreq(desiredState.freq_rx)
+        || desiredState.bw > 1 || desiredState.ctcss_tx > 38) {
+      lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
+      return;
+    }
+    pendingRadioState = desiredState;
+    setMode(rxIdleMode());
+    if (!radio.group(desiredState.bw, desiredState.freq_tx,
+      desiredState.freq_rx, desiredState.ctcss_tx, RadioModule::GROUP)) {
+      lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
+    } else {
+      radioGroupPending = true;
+    }
+    return;
+  }
+  if (!radioGroupPending) reconcileDesiredState(false);
 }
 
 void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *params, size_t param_len) {
@@ -553,25 +601,21 @@ void handleKissParameter(uint8_t command, uint8_t value) {
 }
 
 void prepareAx25TxOverrideChannel(const Ax25TxOverride &txOverride) {
-  drainRadioSerial();
-  // Tune RX to the packet's target before carrier sense. The normal radio
-  // configuration is deliberately marked stale so it is restored after TX.
-  while (!sa818.group(txOverride.bw, txOverride.freqTx, txOverride.freqTx, txOverride.ctcssTx, 0, 0)) {
-    lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
-    esp_task_wdt_reset();
+  if (radio.group(txOverride.bw, txOverride.freqTx,
+      txOverride.freqTx, txOverride.ctcssTx, RadioModule::OVERRIDE)) {
+    normalRadioConfigured = false;
+    ax25OverrideInProgress = true;
+    markDeviceStateDirty();
   }
-  radioConfigApplied = false;
-  ax25OverrideChannelPrepared = true;
-  ax25OverrideChannelReadyAt = millis() + AX25_OVERRIDE_RX_SETTLE_MS;
 }
 
 // Android sends COMMAND_HOST_TX_AX25 for every APRS packet, including a
 // beacon on the channel that is already configured. Avoid an unnecessary
-// SA818 group command in that case: it would otherwise also force a second
+// radio group command in that case: it would otherwise also force a second
 // group command immediately after PTT is released.
 bool ax25OverrideMatchesActiveChannel(const Ax25TxOverride &txOverride) {
   static constexpr float FREQ_MATCH_EPSILON_MHZ = 0.0001f;
-  return radioConfigApplied
+  return normalRadioConfigured
     && (desiredState.flags & HOST_STATE_RADIO_CONFIG_VALID)
     && txOverride.bw == desiredState.bw
     && txOverride.ctcssTx == desiredState.ctcss_tx
@@ -583,17 +627,21 @@ void ax25TxLoop() {
   const Ax25TxJob *pendingJob = ax25TxScheduler.head();
   if (pendingJob == nullptr) return;
   bool receiveIdle = mode == MODE_RX || mode == MODE_STOPPED;
-  if (!receiveIdle || !txAllowedByHost()) return;
+  if (!receiveIdle || !txAllowedByHost() || !radioFound) return;
   uint32_t now = millis();
   if (pendingJob->hasTxOverride && !ax25OverrideMatchesActiveChannel(pendingJob->txOverride)) {
     // A host configuration update may have restored the normal radio while
     // this job was waiting, so prepare the target channel again in that case.
-    if (!ax25OverrideChannelPrepared || radioConfigApplied) {
-      prepareAx25TxOverrideChannel(pendingJob->txOverride);
+    if (!ax25OverrideChannelPrepared || normalRadioConfigured) {
+      if (!ax25OverrideInProgress && !radio.busy() &&
+          !radioFilterPending && !radioGroupPending)
+        prepareAx25TxOverrideChannel(pendingJob->txOverride);
       return;
     }
     if ((int32_t)(now - ax25OverrideChannelReadyAt) < 0) return;
   }
+  if (radio.busy() || radioFilterPending || radioGroupPending ||
+      (!pendingJob->hasTxOverride && radioConfigChanged())) return;
 
   // Use SoftSQ's raw HF-noise decision for RF/voice carrier detection. Audio
   // CTCSS and UI-squelch choices must not affect CSMA channel access.
@@ -649,23 +697,11 @@ void rssiLoop() {
           latestRssi = rssi;
           markDeviceStateDirty();
         }
-      } else if (mode == MODE_RX && !freeDv2400bEnabled()) {
-        // TODO fix the dra818 library's implementation of rssi(). Right now it just drops the
-        // return value from the module, and just tells us success/fail.
-        // int rssi = dra->rssi();
-        Serial1.println("RSSI?");
-        String rssiResponse = Serial1.readString();
-        if (rssiResponse.length() > 7) {
-          String rssiStr = rssiResponse.substring(5);
-          int rssiInt    = rssiStr.toInt();
-          if (rssiInt >= 0 && rssiInt <= 255) {
-            uint8_t rssi = (uint8_t)rssiInt;
-            if (latestRssi != rssi) {
-              latestRssi = rssi;
-              markDeviceStateDirty();
-            }
-          }
-        }
+      } else if (mode == MODE_RX && !freeDv2400bEnabled() &&
+                 radioFound && !radio.busy() && !radioConfigChanged() &&
+                 filtersApplied && desiredFilterFlags() ==
+                   (appliedState.flags & (HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW))) {
+        radio.rssi();
       }
     }
     END_EVERY_N_MILLISECONDS();
@@ -690,42 +726,13 @@ void deviceStateLoop() {
   END_EVERY_N_MILLISECONDS();
 }
 
-void bluetoothLoop() {
-#if CONFIG_IDF_TARGET_ESP32
-  if (!bluetoothStarted) {
-    return;
-  }
-
-  bool connected = SerialBT.hasClient();
-  if (connected && !bluetoothProtocolConnected) {
-    bluetoothProtocolConnected = true;
-    protocolBtSession.connected = true;
-    bluetoothParser.reset();
-    sendHello(protocolBtSession, FIRMWARE_VER, radioModuleStatus, hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(), currentDeviceState(protocolBtSession.flags));
-  } else if (!connected && bluetoothProtocolConnected) {
-    bluetoothProtocolConnected = false;
-    protocolBtSession.connected = false;
-    uint16_t oldSessionFlags = protocolBtSession.flags;
-    protocolBtSession.flags = 0;
-    bluetoothParser.reset();
-    if (oldSessionFlags != 0) {
-      reconcileDesiredState();
-    }
-  }
-
-  if (bluetoothProtocolConnected) {
-    bluetoothParser.loop();
-  }
-#endif
-}
-
 void bleKissLoop() {
   bleKissStream.loop();
   bool connected = bleKissStream.isConnected();
   bool protocolReady = bleKissStream.canSend();
-  if (protocolReady && !bleKissProtocolConnected) {
+  if (protocolReady && radioHelloReady() && !bleKissProtocolConnected) {
     bleKissParser.reset();
-    sendHello(protocolBleSession, FIRMWARE_VER, radioModuleStatus, hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(), currentDeviceState(protocolBleSession.flags));
+    sendHello(protocolBleSession, FIRMWARE_VER, radioStatus(), hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(), getFirmwareFeatures(), currentDeviceState(protocolBleSession.flags));
     bleKissProtocolConnected = true;
     protocolBleSession.connected = true;
     _LOGI("BLE KISS sent HELLO after notify subscription: firmware=%u window=%u", FIRMWARE_VER, BLE_KISS_WINDOW_SIZE);
@@ -750,10 +757,10 @@ void usbConnectionLoop() {
   // Native CDC disappears and reappears on reset. Send HELLO each time the
   // Android host opens the new port, after it has asserted DTR.
   bool connected = static_cast<bool>(Serial);
-  if (connected && !protocolUsbSession.connected) {
+  if (connected && radioHelloReady() && !protocolUsbSession.connected) {
     parser.reset();
     protocolUsbSession.connected = true;
-    sendHello(protocolUsbSession, FIRMWARE_VER, radioModuleStatus,
+    sendHello(protocolUsbSession, FIRMWARE_VER, radioStatus(),
       hw.rfModuleType, moduleMinRadioFreq(), moduleMaxRadioFreq(),
       getFirmwareFeatures(), currentDeviceState(protocolUsbSession.flags));
   } else if (!connected && protocolUsbSession.connected) {
@@ -777,13 +784,13 @@ void squelchLoop() {
 }
 
 void loop() {
+  radioLoop();
   usbConnectionLoop();
   squelchLoop();
   debugLoop();
   ledLoop();
   buttonsLoop();
-  protocolLoop();
-  bluetoothLoop();
+  if (radioHelloReady()) protocolLoop();
   bleKissLoop();
   rxAudioLoop();
   ax25TxLoop();

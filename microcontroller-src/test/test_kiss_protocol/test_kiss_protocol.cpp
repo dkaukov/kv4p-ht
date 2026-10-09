@@ -463,8 +463,8 @@ void test_send_kiss_data_frame_escapes_fend_and_fesc() {
 
 void test_send_kiss_data_frame_broadcasts_to_connected_secondary_stream() {
   FakeStream secondary;
-  ProtocolSession oldBtSession = protocolBtSession;
-  protocolBtSession = { &secondary, true, 0, 0 };
+  ProtocolSession oldBleSession = protocolBleSession;
+  protocolBleSession = { &secondary, true, 0, 0 };
 
   const uint8_t payload[] = { 0x11, 0x22 };
   const uint8_t expected[] = {
@@ -476,7 +476,7 @@ void test_send_kiss_data_frame_broadcasts_to_connected_secondary_stream() {
   TEST_ASSERT_EQUAL(sizeof(expected), secondary.writtenLen());
   TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, secondary.written(), sizeof(expected));
 
-  protocolBtSession = oldBtSession;
+  protocolBleSession = oldBleSession;
 }
 
 void test_send_kv4p_vendor_frame_escapes_payload() {
@@ -499,7 +499,7 @@ void test_send_audio_routes_only_to_rx_audio_open_sessions() {
   FakeStream usb;
   FakeStream secondary;
   ProtocolSession oldUsbSession = protocolUsbSession;
-  ProtocolSession oldBtSession = protocolBtSession;
+  ProtocolSession oldBleSession = protocolBleSession;
   const uint8_t payload[] = { 0x55 };
   const uint8_t expected[] = {
     KISS_FEND, KISS_CMD_SETHARDWARE,
@@ -510,7 +510,7 @@ void test_send_audio_routes_only_to_rx_audio_open_sessions() {
   protocolUsbSession.stream = &usb;
   protocolUsbSession.connected = true;
   protocolUsbSession.flags = HOST_STATE_RX_AUDIO_OPEN;
-  protocolBtSession = { &secondary, true, 0, 0 };
+  protocolBleSession = { &secondary, true, 0, 0 };
 
   sendAudio(payload, sizeof(payload));
 
@@ -519,14 +519,14 @@ void test_send_audio_routes_only_to_rx_audio_open_sessions() {
   TEST_ASSERT_EQUAL(0, secondary.writtenLen());
 
   protocolUsbSession.flags = 0;
-  protocolBtSession.flags = HOST_STATE_RX_AUDIO_OPEN;
+  protocolBleSession.flags = HOST_STATE_RX_AUDIO_OPEN;
   sendAudio(payload, sizeof(payload));
 
   TEST_ASSERT_EQUAL(sizeof(expected), secondary.writtenLen());
   TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, secondary.written(), sizeof(expected));
 
   protocolUsbSession = oldUsbSession;
-  protocolBtSession = oldBtSession;
+  protocolBleSession = oldBleSession;
 }
 
 void test_global_freedv_mode_selects_digital_routing() {
