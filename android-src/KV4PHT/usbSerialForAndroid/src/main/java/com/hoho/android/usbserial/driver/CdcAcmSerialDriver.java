@@ -326,6 +326,13 @@ public class CdcAcmSerialDriver implements UsbSerialDriver {
             setDtrRts();
         }
 
+        @Override
+        public void setDTRandRTS(boolean dtr, boolean rts) throws IOException {
+            mDtr = dtr;
+            mRts = rts;
+            setDtrRts();
+        }
+
         private void setDtrRts() throws IOException {
             int value = (mRts ? 0x2 : 0) | (mDtr ? 0x1 : 0);
             sendAcmControlMessage(SET_CONTROL_LINE_STATE, value, null);

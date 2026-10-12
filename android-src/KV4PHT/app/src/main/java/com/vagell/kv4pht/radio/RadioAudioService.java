@@ -126,8 +126,8 @@ public class RadioAudioService extends Service {
 
 
     // === USB Device Matching ===
-    private static final int[] ESP32_VENDOR_IDS = {4292, 6790};
-    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987};
+    private static final int[] ESP32_VENDOR_IDS = {4292, 6790, 0x303a};
+    private static final int[] ESP32_PRODUCT_IDS = {60000, 29987, 0x1001};
 
     // === Audio Constants ===
     public static final int AUDIO_SAMPLE_RATE = 16000;
@@ -173,7 +173,7 @@ public class RadioAudioService extends Service {
     @Setter
     private APRSIconType aprsPositionIcon = APRSIconType.T_PHONE;
 
-    public enum RadioModuleType {UNKNOWN, VHF, UHF}
+    public enum RadioModuleType {UNKNOWN, VHF, UHF, DUAL}
 
     // === Audio / 4-bit IMA ADPCM Handling ===
     private final short[] pcm16 = new short[AUDIO_FRAME_SAMPLES];
@@ -203,6 +203,7 @@ public class RadioAudioService extends Service {
     private UsbManager usbManager;
     private RadioTransport activeTransport;
     private boolean usbPermissionRequestPending = false;
+    private int pendingUsbDeviceId = -1;
     @Getter
     private Protocol.Sender hostToEsp32;
     @Getter
@@ -423,8 +424,10 @@ public class RadioAudioService extends Service {
             }
             radioModule.stop();
             audioTrack.stop();
+            connectionController.stop();
             if (!activeTransport.prepareForFirmwareFlashing()) {
                 Log.w(TAG, "USB transport could not enter firmware flashing mode.");
+                connectionController.start();
                 return;
             }
         }
@@ -838,6 +841,12 @@ public class RadioAudioService extends Service {
      */
     private boolean canTransmitOnFrequency(float freq) {
         final float halfBandwidth = radioModule.getHalfBandwidthMhz();
+        if (getRadioType() == RadioModuleType.DUAL) {
+            return (freq >= Math.max(min2mTxFreq, 134.0f) + halfBandwidth
+                    && freq <= Math.min(max2mTxFreq, 174.0f) - halfBandwidth)
+                || (freq >= Math.max(min70cmTxFreq, 400.0f) + halfBandwidth
+                    && freq <= Math.min(max70cmTxFreq, 470.0f) - halfBandwidth);
+        }
         return  (freq >= (minTxFreq + halfBandwidth)) && (freq <= (maxTxFreq - halfBandwidth));
     }
 
@@ -885,7 +894,11 @@ public class RadioAudioService extends Service {
             while (freq > 500.0f) {
                 freq /= 10;
             }
-            return formatFreq(Math.max(getMinRadioFreq(), Math.min(freq, getMaxRadioFreq())));
+            float safe = Math.max(getMinRadioFreq(), Math.min(freq, getMaxRadioFreq()));
+            if (getRadioType() == RadioModuleType.DUAL && safe > 174.0f && safe < 400.0f) {
+                safe = safe < 287.0f ? 174.0f : 400.0f;
+            }
+            return formatFreq(safe);
         } catch (NumberFormatException e) {
             return formatFreq(minTxFreq);
         }
@@ -934,7 +947,7 @@ public class RadioAudioService extends Service {
 
     private String getTxFreq(String txFreq, int offset, int khz) {
         if (offset == ChannelMemory.OFFSET_NONE) {
-            return txFreq;
+            return makeSafeHamFreq(txFreq);
         } else {
             float freqFloat = Float.parseFloat(txFreq);
             if (offset == ChannelMemory.OFFSET_UP) {
@@ -1128,19 +1141,24 @@ public class RadioAudioService extends Service {
     public void reconnectViaUSB() {
         Log.i(TAG, connectLog("reconnectViaUSB(): clearing pending state for next attempt"));
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         // Re-plug is an explicit user/device action; allow connection attempts again.
         radioMissingNotified = false;
     }
 
     public void renegotiateAfterFlashing() {
         Log.i(TAG, connectLog("renegotiateAfterFlashing(): closing port and resetting state before renegotiation"));
-        closePortAndReset();
-        reconnectViaUSB();
+        handler.post(() -> {
+            closePortAndReset();
+            reconnectViaUSB();
+            connectionController.start();
+        });
     }
 
     public void onUsbPermissionDenied() {
         Log.w(TAG, connectLog("USB permission denied by system dialog"));
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         radioMissing();
     }
 
@@ -1174,6 +1192,21 @@ public class RadioAudioService extends Service {
         Optional<UsbDevice> device = usbManager.getDeviceList().values().stream()
             .filter(this::isESP32Device)
             .findFirst();
+        if (usbPermissionRequestPending && (!device.isPresent()
+            || device.get().getDeviceId() != pendingUsbDeviceId)) {
+            usbPermissionRequestPending = false;
+            pendingUsbDeviceId = -1;
+        }
+        if (activeTransport instanceof UsbSerialRadioTransport) {
+            UsbDevice connectedDevice = ((UsbSerialRadioTransport) activeTransport)
+                .getSerialPort().getDriver().getDevice();
+            if (!device.isPresent() || device.get().getDeviceId() != connectedDevice.getDeviceId()) {
+                Log.i(TAG, connectLog("reconcileConnections(): USB device re-enumerated"));
+                radioMissing();
+                usbPermissionRequestPending = false;
+                pendingUsbDeviceId = -1;
+            }
+        }
         if (isConnectionReady()) {
             return;
         }
@@ -1216,16 +1249,17 @@ public class RadioAudioService extends Service {
      */
     public void setupSerialConnection() {
         Log.d(TAG, connectLog("setupSerialConnection(): begin"));
-        // Find all available drivers from attached devices.
+        // Probe only the selected radio; another USB serial device may be attached.
         UsbManager manager = (UsbManager) getSystemService(Context.USB_SERVICE);
-        List<UsbSerialDriver> availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager);
-        if (availableDrivers.isEmpty()) {
+        Optional<UsbDevice> radioDevice = manager.getDeviceList().values().stream()
+            .filter(this::isESP32Device).findFirst();
+        UsbSerialDriver driver = radioDevice.isPresent()
+            ? UsbSerialProber.getDefaultProber().probeDevice(radioDevice.get()) : null;
+        if (driver == null) {
             Log.d(TAG, connectLog("setupSerialConnection(): no available USB drivers"));
             radioMissing();
             return;
         }
-        // Open a connection to the first available driver.
-        UsbSerialDriver driver = availableDrivers.get(0);
         if (!manager.hasPermission(driver.getDevice())) {
             if (usbPermissionRequestPending) {
                 Log.d(TAG, connectLog("setupSerialConnection(): USB permission request already pending"));
@@ -1233,6 +1267,7 @@ public class RadioAudioService extends Service {
             }
             Log.i(TAG, connectLog("setupSerialConnection(): requesting USB permission"));
             usbPermissionRequestPending = true;
+            pendingUsbDeviceId = driver.getDevice().getDeviceId();
             PendingIntent permissionIntent = PendingIntent.getBroadcast(
                 this,
                 0,
@@ -1243,6 +1278,7 @@ public class RadioAudioService extends Service {
             return;
         }
         usbPermissionRequestPending = false;
+        pendingUsbDeviceId = -1;
         UsbDeviceConnection connection = manager.openDevice(driver.getDevice());
         if (connection == null) {
             Log.w(TAG, connectLog("setupSerialConnection(): couldn't open USB device"));
@@ -1471,6 +1507,9 @@ public class RadioAudioService extends Service {
         if (Protocol.RfModuleType.RF_SA818_VHF.equals(rfModuleType)) {
             return RadioModuleType.VHF;
         }
+        if (Protocol.RfModuleType.RF_SA518_DUAL.equals(rfModuleType)) {
+            return RadioModuleType.DUAL;
+        }
         return RadioModuleType.UNKNOWN;
     }
 
@@ -1491,6 +1530,9 @@ public class RadioAudioService extends Service {
             setMaxTxFreq(max2mTxFreq);
         } else if (RadioModuleType.UHF.equals(getRadioType())) {
             setMinTxFreq(min70cmTxFreq);
+            setMaxTxFreq(max70cmTxFreq);
+        } else if (RadioModuleType.DUAL.equals(getRadioType())) {
+            setMinTxFreq(min2mTxFreq);
             setMaxTxFreq(max70cmTxFreq);
         }
         Log.d(TAG, "Radio type set to: " + getRadioType());
@@ -1644,7 +1686,8 @@ public class RadioAudioService extends Service {
             Log.d(TAG, "Memory with id " + candidate.memoryId + " had invalid frequency.");
             return false;
         }
-        if (candidate.skipDuringScan || frequency < getMinRadioFreq() || frequency > getMaxRadioFreq()) {
+        if (candidate.skipDuringScan || frequency < getMinRadioFreq() || frequency > getMaxRadioFreq()
+            || (getRadioType() == RadioModuleType.DUAL && frequency > 174.0f && frequency < 400.0f)) {
             return false;
         }
         int desiredSquelch = scanBaseSquelch >= 0 ? scanBaseSquelch : radioModule.getDesiredSquelch();

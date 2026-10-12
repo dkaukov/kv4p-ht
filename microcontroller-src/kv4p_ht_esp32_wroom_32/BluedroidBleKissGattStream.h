@@ -73,7 +73,11 @@ public:
     uint16_t connMaxInterval = 12;
     uint16_t connLatency = 0;
     uint16_t connTimeout = 400;
+#if CONFIG_IDF_TARGET_ESP32S3
+    esp_power_level_t txPower = ESP_PWR_LVL_P9;
+#else
     esp_power_level_t txPower = ESP_PWR_LVL_P7;
+#endif
   };
 
   struct Stats {

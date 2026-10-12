@@ -230,7 +230,8 @@ public final class Protocol {
     @Getter
     public enum RfModuleType {
         RF_SA818_VHF(0),
-        RF_SA818_UHF(1);
+        RF_SA818_UHF(1),
+        RF_SA518_DUAL(2);
         private final int value;
         RfModuleType(int value) {
             this.value = value;

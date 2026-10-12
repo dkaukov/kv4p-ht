@@ -135,7 +135,11 @@ bool protocolSessionConnected(const ProtocolSession &session) {
 
 ProtocolSession protocolUsbSession = {
   .stream = &Serial,
+#if CONFIG_IDF_TARGET_ESP32S3
+  .connected = false,
+#else
   .connected = true,
+#endif
   .flags = 0,
   .windowSize = 0,
 };

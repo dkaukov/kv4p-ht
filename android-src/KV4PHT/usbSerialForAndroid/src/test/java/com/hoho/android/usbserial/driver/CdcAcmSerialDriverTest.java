@@ -83,6 +83,12 @@ public class CdcAcmSerialDriverTest {
         assertEquals(readEndpoint, port.mReadEndpoint);
         assertEquals(writeEndpoint, port.mWriteEndpoint);
 
+        clearInvocations(usbDeviceConnection);
+        port.setDTRandRTS(true, true);
+        assertEquals(true, port.getDTR());
+        assertEquals(true, port.getRTS());
+        verify(usbDeviceConnection, times(1)).controlTransfer(0x21, 0x22, 0x03, 0, null, 0, 5000);
+
         ProbeTable probeTable = UsbSerialProber.getDefaultProbeTable();
         Class<? extends UsbSerialDriver> probeDriver = probeTable.findDriver(usbDevice);
         assertEquals(driver.getClass(), probeDriver);

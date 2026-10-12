@@ -93,6 +93,12 @@ final class UsbSerialRadioTransport implements RadioTransport {
             return false;
         }
         ioManager.stop();
+        // The S3 native USB port disconnects when the chip resets. Let the
+        // flasher enter the ROM bootloader and reopen the enumerated port.
+        if (serialPort.getDriver().getDevice().getVendorId() == 0x303a
+            && serialPort.getDriver().getDevice().getProductId() == 0x1001) {
+            return true;
+        }
         try {
             serialPort.setDTR(false);
             serialPort.setRTS(true);

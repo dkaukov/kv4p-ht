@@ -41,17 +41,24 @@ jobs:
 
       - name: Build debug and release firmware
         working-directory: microcontroller-src
-        run: pio run -e esp32dev -e esp32dev-release
+        run: pio run -e esp32dev -e esp32dev-release -e esp32s3-release
 
       - name: Run firmware tests
         working-directory: microcontroller-src
         run: pio test -e native-tests
 
+      - name: Prepare firmware for Android build
+        run: |
+          mkdir -p .pr-firmware
+          cp microcontroller-src/.pio/build/esp32dev-release/firmware.bin .pr-firmware/esp32.bin
+          cp microcontroller-src/.pio/build/esp32s3-release/firmware.bin .pr-firmware/esp32s3.bin
+          cp microcontroller-src/.pio/build/esp32s3-release/bootloader.bin .pr-firmware/esp32s3-bootloader.bin
+
       - name: Upload firmware for Android build
         uses: actions/upload-artifact@v7
         with:
           name: pr-firmware-${{ github.event.pull_request.number }}
-          path: microcontroller-src/.pio/build/esp32dev-release/firmware.bin
+          path: .pr-firmware/*
           if-no-files-found: error
           retention-days: 1
 
@@ -96,8 +103,14 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           install -m 0644 \
-            ../../.pr-firmware/firmware.bin \
+            ../../.pr-firmware/esp32.bin \
             app/src/main/res/raw/firmware_v17.bin
+          install -m 0644 \
+            ../../.pr-firmware/esp32s3.bin \
+            app/src/main/res/raw/firmware_s3_v17.bin
+          install -m 0644 \
+            ../../.pr-firmware/esp32s3-bootloader.bin \
+            app/src/main/res/raw/bootloader_s3.bin
       - name: Gradle Check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

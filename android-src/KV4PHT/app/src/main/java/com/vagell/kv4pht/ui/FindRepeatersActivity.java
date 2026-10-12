@@ -231,21 +231,24 @@ public class FindRepeatersActivity extends AppCompatActivity {
     }
 
     private String[] getDownloadRepeatersUrls() {
-        if (radioAudioService.getRadioType() == RadioAudioService.RadioModuleType.VHF) {
-            String usVhfURL = "https://www.repeaterbook.com/repeaters/downloads/csv/index.php?func=prox&features%5B0%5D=FM&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=25&Dunit=m&band=4&call=&use=OPEN&status_id=1";
-            String internationalVhfURL = "https://www.repeaterbook.com/row_repeaters/downloads/csv/index.php?func=prox2&city=&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=40&Dunit=k&band=4&freq=0&feature=0&call=&mode=1&net=0&status_id=%&use=&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude; // RepeaterBook requires latitude/longitude twice for international results.
-            return new String[]{usVhfURL, internationalVhfURL};
-        } else { // UHF
-            String usUhfURL = "https://www.repeaterbook.com/repeaters/downloads/csv/index.php?func=prox&features%5B0%5D=FM&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=25&Dunit=m&band=16&band2=&call=&use=OPEN&status_id=1";
-            String internationalUhfURL = "https://www.repeaterbook.com/row_repeaters/downloads/csv/index.php?func=prox2&city=&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=40&Dunit=k&band=16&freq=0&feature=0&call=&mode=1&net=0&status_id=%&use=&lat=" +
-                    latitude + URL_LONGITUDE_PARAMETER + longitude; // RepeaterBook requires latitude/longitude twice for international results.
-            return new String[]{usUhfURL, internationalUhfURL};
-        }
+        RadioAudioService.RadioModuleType type = radioAudioService.getRadioType();
+        if (type == RadioAudioService.RadioModuleType.VHF) return getDownloadRepeatersUrlsForBand(true);
+        if (type != RadioAudioService.RadioModuleType.DUAL) return getDownloadRepeatersUrlsForBand(false);
+        String[] vhf = getDownloadRepeatersUrlsForBand(true);
+        String[] uhf = getDownloadRepeatersUrlsForBand(false);
+        return new String[]{vhf[0], vhf[1], uhf[0], uhf[1]};
+    }
+
+    private String[] getDownloadRepeatersUrlsForBand(boolean vhf) {
+        String band = vhf ? "4" : "16";
+        String usUrl = "https://www.repeaterbook.com/repeaters/downloads/csv/index.php?func=prox&features%5B0%5D=FM&lat=" +
+                latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=25&Dunit=m&band=" + band +
+                (vhf ? "" : "&band2=") + "&call=&use=OPEN&status_id=1";
+        String internationalUrl = "https://www.repeaterbook.com/row_repeaters/downloads/csv/index.php?func=prox2&city=&lat=" +
+                latitude + URL_LONGITUDE_PARAMETER + longitude + "&distance=40&Dunit=k&band=" + band +
+                "&freq=0&feature=0&call=&mode=1&net=0&status_id=%&use=&lat=" +
+                latitude + URL_LONGITUDE_PARAMETER + longitude; // RepeaterBook requires latitude/longitude twice for international results.
+        return new String[]{usUrl, internationalUrl};
     }
 
     private void attemptNextDownload() {

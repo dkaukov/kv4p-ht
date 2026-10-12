@@ -20,7 +20,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <AudioTools.h>
 #include <AudioTools/AudioCodecs/CodecADPCM.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "s3AdcStream.h"
+#endif
+#if CONFIG_IDF_TARGET_ESP32
 #include <driver/dac.h>
+#endif
 #include <esp_task_wdt.h>
 #include <AfskDemodulator.h>
 #include <FreeDv2400b.h>
@@ -176,7 +181,11 @@ private:
 };
 
 bool rxStreamConfigured = false;
+#if CONFIG_IDF_TARGET_ESP32S3
+S3AdcStream in;
+#else
 AnalogAudioStream in;
+#endif
 AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
 // The ESP32 ADC/I2S clock was measured about 400 samples/s slow. Request the
 // nominal 48 kHz rate plus that correction so the captured stream is near
@@ -200,12 +209,16 @@ FreeDvTapEffect freeDvTapEffect;
 SoftSquelchEffect softSquelchEffect(AUDIO_SAMPLE_RATE, ZCR_DECAY_TIME, SQ_CLOSE_DELAY);
 
 inline void injectADCBias() {
+#if CONFIG_IDF_TARGET_ESP32
   dac_output_enable(DAC_CHANNEL_2);  // GPIO26 (DAC1)
   dac_output_voltage(DAC_CHANNEL_2, (255.0 / 3.3) * hw.adcBias);
+#endif
 } 
 
 inline void setUpADCAttenuator() {
+#if CONFIG_IDF_TARGET_ESP32
   adc1_config_channel_atten(I2S_ADC_CHANNEL, hw.adcAttenuation);
+#endif
 }
 
 void initI2SRx() {
@@ -215,6 +228,12 @@ void initI2SRx() {
   injectADCBias();
   setUpADCAttenuator();
   //AudioToolsLogger.begin(debugPrinter, AudioToolsLogLevel::Debug);
+#if CONFIG_IDF_TARGET_ESP32S3
+  if (!in.begin(RX_ADC_SAMPLE_RATE, hw.pins.pinAudioIn, hw.adcAttenuation)) {
+    _LOGE("S3 ADC initialization failed");
+    return;
+  }
+#else
   auto config = in.defaultConfig(RX_MODE);
   config.copyFrom(rxInfo);
   config.is_auto_center_read = false; // We use dcOffsetRemover instead
@@ -223,6 +242,7 @@ void initI2SRx() {
   config.adc_pin = hw.pins.pinAudioIn;
   config.sample_rate = RX_ADC_SAMPLE_RATE;
   in.begin(config);
+#endif
   // effects
   effects.clear();
   afskTapEffect.setActive(true);

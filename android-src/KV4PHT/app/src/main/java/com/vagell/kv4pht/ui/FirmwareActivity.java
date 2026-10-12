@@ -143,12 +143,14 @@ public class FirmwareActivity extends AppCompatActivity {
                 @Override
                 public void doneFlashing(boolean success) {
                     Log.d("FirmwareActivity", "Flashing done: " + success);
-                    if (success) {
-                        setResult(Activity.RESULT_OK);
-                        finish();
-                    } else {
-                        showErrorSnackBar(serialPort);
-                    }
+                    runOnUiThread(() -> {
+                        if (success) {
+                            setResult(Activity.RESULT_OK);
+                            finish();
+                        } else {
+                            showErrorSnackBar(serialPort);
+                        }
+                    });
                 }
             }));
     }

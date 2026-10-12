@@ -1,7 +1,5 @@
 package com.vagell.kv4pht.firmware;
 
-import static org.dkaukov.esp32.chip.Esp32ChipId.ESP32;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,10 +14,11 @@ import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.vagell.kv4pht.R;
 
 import org.dkaukov.esp32.chip.FlashRegion;
+import org.dkaukov.esp32.chip.Esp32ChipId;
 import org.dkaukov.esp32.core.EspFlasherApi;
+import org.dkaukov.esp32.core.EspFlasherApi.DetectedStage;
 import org.dkaukov.esp32.core.EspFlasherApi.StartStage;
 import org.dkaukov.esp32.io.ProgressCallback;
-import org.dkaukov.esp32.io.SerialTransport;
 import org.dkaukov.esp32.protocol.EspFlasherProtocol;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +41,8 @@ public final class FirmwareUtils {
     private static final int ESP32_PARTITION_TABLE = R.raw.partitions;
     private static final int ESP32_BOOT_APP_0 = R.raw.boot_app0;
     private static final int ESP32_APP = R.raw.firmware_v17;
+    private static final int ESP32S3_BOOTLOADER = R.raw.bootloader_s3;
+    private static final int ESP32S3_APP = R.raw.firmware_s3_v17;
 
     static {
         LoggerFactory.getLogger(EspFlasherProtocol.class).trace("Init..");
@@ -69,26 +70,45 @@ public final class FirmwareUtils {
             Log.w(TAG, "Warning: Already flashing.");
             return;
         }
+        FirmwareUsbSerialTransport transport = new FirmwareUsbSerialTransport(ctx, usbSerialPort);
         try {
-            setBaudRate(usbSerialPort, EspFlasherApi.ESP_ROM_BAUD);
+            setBaudRate(transport, EspFlasherApi.ESP_ROM_BAUD);
             Log.i(TAG, "Starting firmware flash, version: " + PACKAGED_FIRMWARE_VER);
+            final ProgressCallback[] progress = new ProgressCallback[1];
+            StartStage flasher = EspFlasherApi.connect(transport)
+                .withCallBack(new ProgressCallback() {
+                    @Override public void onProgress(float pct) {
+                        if (progress[0] != null) progress[0].onProgress(pct);
+                    }
+                    @Override public void onEnd() {
+                        if (progress[0] != null) progress[0].onEnd();
+                    }
+                    @Override public void onInfo(String value) {
+                        Log.d(TAG_ESP32_FLASHER, value);
+                    }
+                });
+            DetectedStage detected = flasher.chipDetect();
+            Esp32ChipId chip = detected.getChipId();
+            int bootloaderResource = bootloaderResource(chip);
+            int appResource = appResource(chip);
+            if (chip == Esp32ChipId.ESP32) {
+                flasher.withBaudRate(EspFlasherApi.ESP_ROM_BAUD_HIGHEST,
+                    b -> setBaudRate(transport, b));
+            }
             Map<FlashRegion, byte[]> flashRegions = new EnumMap<>(FlashRegion.class);
-            flashRegions.put(FlashRegion.BOOTLOADER, readResource(ctx, ESP32_BOOTLOADER));
+            flashRegions.put(FlashRegion.BOOTLOADER, readResource(ctx, bootloaderResource));
             flashRegions.put(FlashRegion.PARTITION_TABLE, readResource(ctx, ESP32_PARTITION_TABLE));
             flashRegions.put(FlashRegion.APP_BOOTLOADER, readResource(ctx, ESP32_BOOT_APP_0));
-            flashRegions.put(FlashRegion.APP_0, readResource(ctx, ESP32_APP));
-            StartStage flasher = EspFlasherApi.connect(getSerialTransport(usbSerialPort))
-                .withCallBack(getProgressCallback(flashRegions, callback));
+            flashRegions.put(FlashRegion.APP_0, readResource(ctx, appResource));
+            progress[0] = getProgressCallback(flashRegions, callback);
             callback.connectedToBootloader();
-            flasher.withBaudRate(EspFlasherApi.ESP_ROM_BAUD_HIGHEST, b -> setBaudRate(usbSerialPort, b))
-                .chipDetect()
-                .loadStub()
+            detected.loadStub()
                 .withCompression(false)
-                .writeFlash(ESP32.getRegion(FlashRegion.BOOTLOADER), flashRegions.get(FlashRegion.BOOTLOADER))
-                .writeFlash(ESP32.getRegion(FlashRegion.PARTITION_TABLE), flashRegions.get(FlashRegion.PARTITION_TABLE))
-                .writeFlash(ESP32.getRegion(FlashRegion.APP_BOOTLOADER), flashRegions.get(FlashRegion.APP_BOOTLOADER))
+                .writeFlash(chip.getRegion(FlashRegion.BOOTLOADER), flashRegions.get(FlashRegion.BOOTLOADER))
+                .writeFlash(chip.getRegion(FlashRegion.PARTITION_TABLE), flashRegions.get(FlashRegion.PARTITION_TABLE))
+                .writeFlash(chip.getRegion(FlashRegion.APP_BOOTLOADER), flashRegions.get(FlashRegion.APP_BOOTLOADER))
                 .withCompression(true)
-                .writeFlash(ESP32.getRegion(FlashRegion.APP_0), flashRegions.get(FlashRegion.APP_0))
+                .writeFlash(chip.getRegion(FlashRegion.APP_0), flashRegions.get(FlashRegion.APP_0))
                 .reset();
             Log.i(TAG, "Firmware flash completed successfully.");
             callback.doneFlashing(true);
@@ -96,6 +116,7 @@ public final class FirmwareUtils {
             Log.e(TAG, "Firmware flashing failed", e);
             callback.doneFlashing(false);
         } finally {
+            transport.close();
             isFlashing.set(false);
         }
     }
@@ -104,34 +125,21 @@ public final class FirmwareUtils {
         return isFlashing.get();
     }
 
-    @SneakyThrows
-    private static void setBaudRate(UsbSerialPort usbSerialPort, int baudRate) {
-        usbSerialPort.setParameters(baudRate, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+    static int bootloaderResource(Esp32ChipId chip) {
+        if (chip == Esp32ChipId.ESP32) return ESP32_BOOTLOADER;
+        if (chip == Esp32ChipId.ESP32S3) return ESP32S3_BOOTLOADER;
+        throw new IllegalArgumentException("No bundled firmware for " + chip);
     }
 
-    private static SerialTransport getSerialTransport(UsbSerialPort usbSerialPort) {
-        return new SerialTransport() {
-            @Override
-            public int read(byte[] buffer, int length) throws IOException {
-                if (Thread.currentThread().isInterrupted()) {
-                    Log.w(TAG, "Read operation interrupted, terminating.");
-                    throw new IOException("Read operation interrupted");
-                }
-                return usbSerialPort.read(buffer, length, 100);
-            }
-            @Override
-            public void write(byte[] buffer, int length) throws IOException {
-                if (Thread.currentThread().isInterrupted()) {
-                    Log.w(TAG, "Write operation interrupted, terminating.");
-                    throw new IOException("Write operation interrupted");
-                }
-                usbSerialPort.write(buffer, length, 0);
-            }
-            @Override
-            public void setControlLines(boolean dtr, boolean rts) throws IOException {
-                usbSerialPort.setDTRandRTS(dtr, rts);
-            }
-        };
+    static int appResource(Esp32ChipId chip) {
+        if (chip == Esp32ChipId.ESP32) return ESP32_APP;
+        if (chip == Esp32ChipId.ESP32S3) return ESP32S3_APP;
+        throw new IllegalArgumentException("No bundled firmware for " + chip);
+    }
+
+    @SneakyThrows
+    private static void setBaudRate(FirmwareUsbSerialTransport transport, int baudRate) {
+        transport.setBaudRate(baudRate);
     }
 
     private static ProgressCallback getProgressCallback(Map<FlashRegion, byte[]> flashRegions, FirmwareCallback callback) {

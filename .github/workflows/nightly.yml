@@ -78,7 +78,7 @@ jobs:
 
       - name: Build debug and release firmware
         working-directory: microcontroller-src
-        run: pio run -e esp32dev -e esp32dev-release
+        run: pio run -e esp32dev -e esp32dev-release -e esp32s3-release
 
       - name: Run firmware tests
         working-directory: microcontroller-src
@@ -89,6 +89,12 @@ jobs:
           install -m 0644 \
             microcontroller-src/.pio/build/esp32dev-release/firmware.bin \
             android-src/KV4PHT/app/src/main/res/raw/firmware_v17.bin
+          install -m 0644 \
+            microcontroller-src/.pio/build/esp32s3-release/firmware.bin \
+            android-src/KV4PHT/app/src/main/res/raw/firmware_s3_v17.bin
+          install -m 0644 \
+            microcontroller-src/.pio/build/esp32s3-release/bootloader.bin \
+            android-src/KV4PHT/app/src/main/res/raw/bootloader_s3.bin
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6

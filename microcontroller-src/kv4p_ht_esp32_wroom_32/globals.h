@@ -20,10 +20,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Arduino.h>
 #include <driver/adc.h>
 
-// RF module types
+// Stored in hardware-config NVS and sent in HELLO; keep these values stable.
 enum RfModuleType : uint8_t {
   RF_SA818_VHF = 0,
   RF_SA818_UHF = 1,
+  RF_SA518_DUAL = 2,
 };
 
 // Firmware audio hardware stays at 48 kHz. Audio frames on USB are 16 kHz 4-bit ADPCM.
@@ -74,9 +75,27 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 
 // I2S audio sampling stuff
 #define I2S_ADC_UNIT    ADC_UNIT_1
+#if CONFIG_IDF_TARGET_ESP32S3
+#define I2S_ADC_CHANNEL ADC1_CHANNEL_0
+#else
 #define I2S_ADC_CHANNEL ADC1_CHANNEL_6
+#endif
 
 // Connections to radio module
+#if CONFIG_IDF_TARGET_ESP32S3
+#define DEFAULT_PIN_RF_RXD    44
+#define DEFAULT_PIN_RF_TXD    43
+#define DEFAULT_PIN_AUDIO_OUT 2
+#define DEFAULT_PIN_AUDIO_IN  1
+#define DEFAULT_PIN_PTT       4
+#define DEFAULT_PIN_PD        5
+#define DEFAULT_PIN_SQ        7
+#define DEFAULT_PIN_PHYS_PTT1 8
+#define DEFAULT_PIN_PHYS_PTT2 9
+#define DEFAULT_PIN_LED       11
+#define DEFAULT_PIN_PIXELS    21
+#define DEFAULT_PIN_HL        6
+#else
 #define DEFAULT_PIN_RF_RXD    16
 #define DEFAULT_PIN_RF_TXD    17
 #define DEFAULT_PIN_AUDIO_OUT 25  // This constant not used, just here for reference. GPIO 25 is implied by use of I2S_DAC_CHANNEL_RIGHT_EN.
@@ -89,11 +108,16 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 #define DEFAULT_PIN_LED        2  // Built in LED
 #define DEFAULT_PIN_PIXELS    13  // NeoPixel data pin
 #define DEFAULT_PIN_HL        -1  // High/Low pin for the radio module. -1 means not used.
+#endif
 #define DEFAULT_VOLUME         8  // Default SA8x8 module audio volume
 
 #define DEFAULT_ADC_BIAS_VOLTAGE     1.75
 #define DEFAULT_ADC_ATTENUATION      ADC_ATTEN_DB_12
+#if CONFIG_IDF_TARGET_ESP32S3
+#define DEFAULT_RF_MODULE_TYPE       RF_SA518_DUAL
+#else
 #define DEFAULT_RF_MODULE_TYPE       RF_SA818_VHF
+#endif
 #define DEFAULT_VOLUME               8
 #define DEFAULT_STOPPED_COLOR        {0, 32, 0}
 

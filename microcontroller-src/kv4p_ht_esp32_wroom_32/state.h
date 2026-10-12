@@ -22,13 +22,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 const char RADIO_MODULE_NOT_FOUND = 'x';
 const char RADIO_MODULE_FOUND = 'f';
 
-char radioModuleStatus = RADIO_MODULE_NOT_FOUND;
 boolean rssiOn = true;
 HostDesiredState desiredState = {
   .sequence = 0,
   .memoryId = -1,
   .flags = HOST_STATE_HIGH_POWER | HOST_STATE_RSSI_ENABLED,
-  .bw = DRA818_25K,
+  .bw = 1,
   .freq_tx = 0.0f,
   .freq_rx = 0.0f,
   .ctcss_tx = 0,
@@ -37,7 +36,6 @@ HostDesiredState desiredState = {
 };
 HostDesiredState appliedState = {};
 HostDesiredState persistedState = {};
-bool radioConfigApplied = false;
 bool filtersApplied = false;
 uint8_t lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
 uint8_t latestRssi = 0;
