@@ -517,16 +517,10 @@ void radioLoop() {
   if (!radioFilterPending && (!filtersApplied || filterFlags != appliedFilterFlags)) {
     rxDownsample.setFilters((filterFlags & HOST_STATE_FILTER_HIGH) != 0,
                             (filterFlags & HOST_STATE_FILTER_LOW) != 0);
-    if (hw.rfModuleType == RF_SA518_DUAL) {
-      // SA518 V1.2 has no documented SETFILTER command.
-      appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | filterFlags;
-      filtersApplied = true;
-    } else {
-      pendingFilterFlags = filterFlags;
-      radioFilterPending = true;
-      radio.filter((filterFlags & HOST_STATE_FILTER_PRE) != 0);
-      return;
-    }
+    pendingFilterFlags = filterFlags;
+    radioFilterPending = true;
+    radio.filter((filterFlags & HOST_STATE_FILTER_PRE) != 0);
+    return;
   }
   if (radioFilterPending) return;
 
