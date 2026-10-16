@@ -21,7 +21,8 @@ class S3AdcStream : public audio_tools::AudioStream {
     adc_digi_pattern_config_t pattern = {};
     pattern.atten = static_cast<uint8_t>(attenuation);
     pattern.channel = channel_;
-    pattern.unit = ADC_UNIT_1;
+    // The DMA pattern uses a zero-based unit index; ADC_UNIT_1 itself is 1.
+    pattern.unit = ADC1_DMA_UNIT;
     pattern.bit_width = 12;
     adc_digi_configuration_t config = {};
     config.pattern_num = 1;
@@ -57,9 +58,14 @@ class S3AdcStream : public audio_tools::AudioStream {
       esp_err_t result = adc_digi_read_bytes(
           reinterpret_cast<uint8_t *>(samples),
           requested * sizeof(samples[0]), &received, 20);
-      if (result != ESP_OK || received == 0) break;
+      // IDF 4 reports a past DMA ring-buffer overflow as INVALID_STATE even
+      // when this read returns valid samples. This can happen during startup
+      // before the main loop first drains the ADC buffer.
+      if (received == 0 ||
+          (result != ESP_OK && result != ESP_ERR_INVALID_STATE)) break;
       for (size_t i = 0; i < received / sizeof(samples[0]); ++i) {
-        if (samples[i].type2.channel != channel_ || samples[i].type2.unit != 0) continue;
+        if (samples[i].type2.channel != channel_ ||
+            samples[i].type2.unit != ADC1_DMA_UNIT) continue;
         int16_t sample = static_cast<int16_t>(samples[i].type2.data);
         memcpy(output + written, &sample, sizeof(sample));
         written += sizeof(sample);
@@ -74,6 +80,7 @@ class S3AdcStream : public audio_tools::AudioStream {
   size_t write(uint8_t) override { return 0; }
 
  private:
+  static constexpr uint8_t ADC1_DMA_UNIT = 0;
   uint8_t channel_ = 0;
   bool running_ = false;
 };
