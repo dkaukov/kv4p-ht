@@ -64,6 +64,10 @@ public:
     ctcssDetector.setToneIndex(toneIndex);
   }
 
+  bool isCtcssDetected() const {
+    return ctcssDetector.isDetected();
+  }
+
   effect_t process(effect_t input) override {
     if (!active()) {
       return input;

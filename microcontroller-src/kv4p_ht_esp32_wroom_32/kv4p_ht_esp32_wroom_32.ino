@@ -70,6 +70,8 @@ bool radioFound = false;
 bool normalRadioConfigured = false;
 bool radioFilterPending = false;
 bool radioGroupPending = false;
+uint8_t pendingModuleSquelch = 0;
+uint8_t appliedModuleSquelch = 0;
 HostDesiredState pendingRadioState = {};
 uint16_t pendingFilterFlags = 0;
 Kv4pBleKissStream bleKissStream(bleKissConfig());
@@ -223,6 +225,11 @@ bool freeDv2400bEnabled() {
   return desiredState.flags & HOST_STATE_FREEDV_2400B;
 }
 
+uint8_t moduleSquelchLevel() {
+  return hw.rfModuleType == RF_SA518_DUAL && !freeDv2400bEnabled()
+    ? min(desiredState.squelch, (uint8_t)8) : 0;
+}
+
 uint16_t deviceStateFlags(uint16_t sessionFlags) {
   uint16_t flags = desiredState.flags;
   flags |= sessionFlags & HOST_STATE_SESSION_FLAG_MASK;
@@ -298,6 +305,7 @@ bool radioConfigChanged() {
     || appliedState.freq_rx != desiredState.freq_rx
     || appliedState.ctcss_tx != desiredState.ctcss_tx
     || appliedState.squelch != desiredState.squelch
+    || appliedModuleSquelch != moduleSquelchLevel()
     || appliedState.ctcss_rx != desiredState.ctcss_rx
     || appliedState.memoryId != desiredState.memoryId;
 }
@@ -453,6 +461,7 @@ void handleRadioResult(const RadioModule::Result &result) {
         radioGroupPending = false;
         if (result.ok) {
           normalRadioConfigured = true;
+          appliedModuleSquelch = pendingModuleSquelch;
           appliedState.bw = pendingRadioState.bw;
           appliedState.freq_tx = pendingRadioState.freq_tx;
           appliedState.freq_rx = pendingRadioState.freq_rx;
@@ -484,12 +493,12 @@ void handleRadioResult(const RadioModule::Result &result) {
         break;
       case RadioModule::RSSI:
         if (result.ok) {
-          static bool rssiResponseLogged = false;
-          if (!rssiResponseLogged) {
-            _LOGI("Radio RSSI response: %d", result.value);
-            rssiResponseLogged = true;
+          uint8_t rssi = result.value;
+          if (hw.rfModuleType == RF_SA518_DUAL) {
+            rssi = rssi / 2 - 30;
           }
-          if (latestRssi != result.value) latestRssi = result.value;
+          _LOGD("Radio RSSI response: %d", rssi);
+          if (latestRssi != rssi) latestRssi = rssi;
         }
         break;
     default: break;
@@ -531,9 +540,11 @@ void radioLoop() {
       return;
     }
     pendingRadioState = desiredState;
+    pendingModuleSquelch = moduleSquelchLevel();
     setMode(rxIdleMode());
     if (!radio.group(desiredState.bw, desiredState.freq_tx,
-      desiredState.freq_rx, desiredState.ctcss_tx, RadioModule::GROUP)) {
+      desiredState.freq_rx, desiredState.ctcss_tx, RadioModule::GROUP,
+      pendingModuleSquelch)) {
       lastDeviceStateError = DEVICE_STATE_ERROR_RADIO_CONFIG_FAILED;
     } else {
       radioGroupPending = true;
@@ -661,11 +672,13 @@ void ax25TxLoop() {
   if (radio.busy() || radioFilterPending || radioGroupPending ||
       (!pendingJob->hasTxOverride && radioConfigChanged())) return;
 
-  // Use SoftSQ's raw HF-noise decision for RF/voice carrier detection. Audio
-  // CTCSS and UI-squelch choices must not affect CSMA channel access.
+  // Audio CTCSS and the UI bypass must not affect CSMA channel access.
   bool ourTx = mode == MODE_TX;
   bool afskDcd = afskDemod.carrierDetected();
-  bool rfCarrierDetected = softSquelchEffect.isCarrierDetected();
+  bool rfCarrierDetected = hw.rfModuleType == RF_SA518_DUAL &&
+    appliedModuleSquelch > 0
+      ? digitalRead(hw.pins.pinSq) == LOW
+      : softSquelchEffect.isCarrierDetected();
   bool channelBusy = ourTx || afskDcd || rfCarrierDetected;
   bool channelClear = !channelBusy;
   if (!ax25TxScheduler.ready(now, channelClear, (uint8_t)esp_random())) {
@@ -817,7 +830,11 @@ void usbConnectionLoop() {
 void squelchLoop() {
   freeDvSquelchLoop();
   if (freeDv2400bEnabled()) return;
-  bool nextSquelched = !softSquelchEffect.isSoftOpen();
+  bool nextSquelched = hw.rfModuleType == RF_SA518_DUAL
+    ? !softSquelchEffect.isCtcssDetected() ||
+      (desiredState.squelch > 0 &&
+       (appliedModuleSquelch == 0 || digitalRead(hw.pins.pinSq) == HIGH))
+    : !softSquelchEffect.isSoftOpen();
   if (nextSquelched != squelched) {
     squelched = nextSquelched;
     markDeviceStateDirty();

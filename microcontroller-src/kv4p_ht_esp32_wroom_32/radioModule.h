@@ -62,10 +62,10 @@ public:
     }
   }
   bool group(uint8_t bw, float tx, float rx, uint8_t txTone,
-             Command kind = GROUP) {
+             Command kind = GROUP, uint8_t squelch = 0) {
     if ((kind != GROUP && kind != OVERRIDE) || bw > 1 || txTone > 38 ||
-        !validFrequency(type_, tx) || !validFrequency(type_, rx)) return false;
-    desiredGroup_ = {bw, tx, rx, txTone};
+        squelch > 8 || !validFrequency(type_, tx) || !validFrequency(type_, rx)) return false;
+    desiredGroup_ = {bw, tx, rx, txTone, squelch};
     desiredKind_ = kind;
     groupDirty_ = true;
     return true;
@@ -122,8 +122,9 @@ public:
       sentGroup_ = desiredGroup_;
       sentKind_ = desiredKind_;
       char command[64];
-      snprintf(command, sizeof(command), "AT+DMOSETGROUP=%u,%.4f,%.4f,%04u,0,0000\r\n",
-               sentGroup_.bw, sentGroup_.tx, sentGroup_.rx, sentGroup_.txTone);
+      snprintf(command, sizeof(command), "AT+DMOSETGROUP=%u,%.4f,%.4f,%04u,%u,0000\r\n",
+               sentGroup_.bw, sentGroup_.tx, sentGroup_.rx, sentGroup_.txTone,
+               sentGroup_.squelch);
       start(sentKind_, command);
     } else if (rssiPending_) {
       rssiPending_ = false;
@@ -137,9 +138,11 @@ private:
     float tx;
     float rx;
     uint8_t txTone;
+    uint8_t squelch;
   };
   static bool sameGroup(const GroupSettings &a, const GroupSettings &b) {
-    return a.bw == b.bw && a.tx == b.tx && a.rx == b.rx && a.txTone == b.txTone;
+    return a.bw == b.bw && a.tx == b.tx && a.rx == b.rx &&
+      a.txTone == b.txTone && a.squelch == b.squelch;
   }
   bool start(Command kind, const char *text) {
     if (busy()) return false;

@@ -100,14 +100,15 @@ void test_filter_and_group_are_queued_and_acknowledged_in_order() {
   port.sent.clear();
 
   radio.filter(true);
-  TEST_ASSERT_TRUE(radio.group(1, 144.5f, 435.5f, 0));
+  TEST_ASSERT_FALSE(radio.group(1, 144.5f, 435.5f, 0, RadioModule::GROUP, 9));
+  TEST_ASSERT_TRUE(radio.group(1, 144.5f, 435.5f, 0, RadioModule::GROUP, 8));
   TEST_ASSERT_TRUE(port.sent.empty());
   radio.loop();
   TEST_ASSERT_EQUAL_STRING("AT+SETFILTER=0,1,1\r\n", port.sent.c_str());
   port.received = "+DMOSETFILTER:0\r\n";
   radio.loop();
   TEST_ASSERT_EQUAL_STRING(
-    "AT+SETFILTER=0,1,1\r\nAT+DMOSETGROUP=1,144.5000,435.5000,0000,0,0000\r\n",
+    "AT+SETFILTER=0,1,1\r\nAT+DMOSETGROUP=1,144.5000,435.5000,0000,8,0000\r\n",
     port.sent.c_str());
   port.received = "+DMOSETGROUP:0\r\n";
   radio.loop();
