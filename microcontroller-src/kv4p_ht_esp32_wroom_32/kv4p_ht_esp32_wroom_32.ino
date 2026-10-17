@@ -40,6 +40,7 @@ const uint16_t FIRMWARE_VER = 17;
 
 const uint32_t RSSI_REPORT_INTERVAL_MS = 100;
 const uint32_t DEVICE_STATE_REPORT_INTERVAL_MS = 500;
+const uint32_t RADIO_STATE_SAVE_DELAY_MS = 1500;
 const uint16_t USB_BUFFER_SIZE = 1024*2;
 const uint16_t BLE_KISS_WINDOW_SIZE = 4096;
 
@@ -92,6 +93,7 @@ static constexpr uint16_t AX25_OVERRIDE_RX_SETTLE_MS = 260;
 bool ax25OverrideChannelPrepared = false;
 bool ax25OverrideInProgress = false;
 uint32_t ax25OverrideChannelReadyAt = 0;
+uint32_t desiredRadioStateChangedAtMs = 0;
 
 char radioStatus() {
   return radioFound ? RADIO_MODULE_FOUND : RADIO_MODULE_NOT_FOUND;
@@ -169,35 +171,47 @@ uint16_t persistedStateFlags(uint16_t flags) {
   return flags & (HOST_STATE_RADIO_CONFIG_VALID | HOST_STATE_HIGH_POWER | HOST_STATE_RSSI_ENABLED | HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW | HOST_STATE_TX_ALLOWED);
 }
 
+bool samePersistedRadioState(const HostDesiredState &a, const HostDesiredState &b) {
+  return a.bw == b.bw
+    && a.freq_tx == b.freq_tx
+    && a.freq_rx == b.freq_rx
+    && a.ctcss_tx == b.ctcss_tx
+    && a.squelch == b.squelch
+    && a.ctcss_rx == b.ctcss_rx
+    && a.memoryId == b.memoryId
+    && persistedStateFlags(a.flags) == persistedStateFlags(b.flags);
+}
+
 bool persistedRadioStateMatchesDesired() {
-  return persistedState.bw == desiredState.bw
-    && persistedState.freq_tx == desiredState.freq_tx
-    && persistedState.freq_rx == desiredState.freq_rx
-    && persistedState.ctcss_tx == desiredState.ctcss_tx
-    && persistedState.squelch == desiredState.squelch
-    && persistedState.ctcss_rx == desiredState.ctcss_rx
-    && persistedState.memoryId == desiredState.memoryId
-    && persistedStateFlags(persistedState.flags) == persistedStateFlags(desiredState.flags);
+  return samePersistedRadioState(persistedState, desiredState);
 }
 
 void savePersistedRadioStateIfChanged() {
-  if (persistedRadioStateMatchesDesired()) {
+  // Coalesce rapid frequency changes before writing flash, including scan steps.
+  if (mode == MODE_TX || persistedRadioStateMatchesDesired() ||
+      (uint32_t)(millis() - desiredRadioStateChangedAtMs) < RADIO_STATE_SAVE_DELAY_MS) {
     return;
   }
-  prefs.begin("radio", false);
-  prefs.putUChar("bw", desiredState.bw);
-  prefs.putFloat("freq_tx", desiredState.freq_tx);
-  prefs.putFloat("freq_rx", desiredState.freq_rx);
-  prefs.putUChar("ctcss_tx", desiredState.ctcss_tx);
-  prefs.putUChar("squelch", desiredState.squelch);
-  prefs.putUChar("ctcss_rx", desiredState.ctcss_rx);
-  prefs.putInt("memory_id", desiredState.memoryId);
-  prefs.putBool("high", (desiredState.flags & HOST_STATE_HIGH_POWER) != 0);
-  prefs.putBool("rssi", (desiredState.flags & HOST_STATE_RSSI_ENABLED) != 0);
-  prefs.putBool("flt_pre", (desiredState.flags & HOST_STATE_FILTER_PRE) != 0);
-  prefs.putBool("flt_high", (desiredState.flags & HOST_STATE_FILTER_HIGH) != 0);
-  prefs.putBool("flt_low", (desiredState.flags & HOST_STATE_FILTER_LOW) != 0);
-  prefs.putBool("tx_allowed", (desiredState.flags & HOST_STATE_TX_ALLOWED) != 0);
+  if (!prefs.begin("radio", false)) return;
+  if (persistedState.bw != desiredState.bw) prefs.putUChar("bw", desiredState.bw);
+  if (persistedState.freq_tx != desiredState.freq_tx) prefs.putFloat("freq_tx", desiredState.freq_tx);
+  if (persistedState.freq_rx != desiredState.freq_rx) prefs.putFloat("freq_rx", desiredState.freq_rx);
+  if (persistedState.ctcss_tx != desiredState.ctcss_tx) prefs.putUChar("ctcss_tx", desiredState.ctcss_tx);
+  if (persistedState.squelch != desiredState.squelch) prefs.putUChar("squelch", desiredState.squelch);
+  if (persistedState.ctcss_rx != desiredState.ctcss_rx) prefs.putUChar("ctcss_rx", desiredState.ctcss_rx);
+  if (persistedState.memoryId != desiredState.memoryId) prefs.putInt("memory_id", desiredState.memoryId);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_HIGH_POWER)
+    prefs.putBool("high", (desiredState.flags & HOST_STATE_HIGH_POWER) != 0);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_RSSI_ENABLED)
+    prefs.putBool("rssi", (desiredState.flags & HOST_STATE_RSSI_ENABLED) != 0);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_FILTER_PRE)
+    prefs.putBool("flt_pre", (desiredState.flags & HOST_STATE_FILTER_PRE) != 0);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_FILTER_HIGH)
+    prefs.putBool("flt_high", (desiredState.flags & HOST_STATE_FILTER_HIGH) != 0);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_FILTER_LOW)
+    prefs.putBool("flt_low", (desiredState.flags & HOST_STATE_FILTER_LOW) != 0);
+  if ((persistedState.flags ^ desiredState.flags) & HOST_STATE_TX_ALLOWED)
+    prefs.putBool("tx_allowed", (desiredState.flags & HOST_STATE_TX_ALLOWED) != 0);
   prefs.end();
   persistedState = desiredState;
 }
@@ -326,7 +340,6 @@ void reconcileDesiredState(bool sendReport = true) {
   } else {
     setMode(rxIdleMode());
   }
-  savePersistedRadioStateIfChanged();
   if (sendReport) {
     markDeviceStateDirty();
   }
@@ -582,11 +595,14 @@ void handleCommands(ProtocolSession &session, RcvCommand command, uint8_t *param
         // DeviceState.appliedSequence before sending their next update.
         bool globalStateChanged = incomingState.sequence > desiredState.sequence;
         if (globalStateChanged) {
+          HostDesiredState previousState = desiredState;
           const bool freeDvModeChanged =
               ((incomingState.flags ^ desiredState.flags) &
                HOST_STATE_FREEDV_2400B) != 0;
           desiredState = incomingState;
           desiredState.flags &= HOST_STATE_GLOBAL_FLAG_MASK;
+          if (!samePersistedRadioState(previousState, desiredState))
+            desiredRadioStateChangedAtMs = millis();
           if (freeDvModeChanged) {
             latestRssi = 0;
             freeDvSquelch.reset();
@@ -858,4 +874,5 @@ void loop() {
   txAudioLoop();
   rssiLoop();
   deviceStateLoop();
+  savePersistedRadioStateIfChanged();
 }
