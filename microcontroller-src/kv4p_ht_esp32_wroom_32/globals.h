@@ -119,7 +119,11 @@ static constexpr size_t AX25_MAX_KISS_DATA_LEN =
 #define DEFAULT_RF_MODULE_TYPE       RF_SA818_VHF
 #endif
 #define DEFAULT_VOLUME               8
+#if CONFIG_IDF_TARGET_ESP32S3
+#define DEFAULT_STOPPED_COLOR        {32, 32, 32}
+#else
 #define DEFAULT_STOPPED_COLOR        {0, 32, 0}
+#endif
 
 // Mode of the app, which is essentially a state machine
 enum Mode {

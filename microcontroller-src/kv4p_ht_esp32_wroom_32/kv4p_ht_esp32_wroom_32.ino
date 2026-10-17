@@ -672,13 +672,15 @@ void ax25TxLoop() {
   if (radio.busy() || radioFilterPending || radioGroupPending ||
       (!pendingJob->hasTxOverride && radioConfigChanged())) return;
 
-  // Audio CTCSS and the UI bypass must not affect CSMA channel access.
   bool ourTx = mode == MODE_TX;
   bool afskDcd = afskDemod.carrierDetected();
-  bool rfCarrierDetected = hw.rfModuleType == RF_SA518_DUAL &&
-    appliedModuleSquelch > 0
-      ? digitalRead(hw.pins.pinSq) == LOW
-      : softSquelchEffect.isCarrierDetected();
+  bool rfCarrierDetected;
+  if (hw.rfModuleType == RF_SA518_DUAL) {
+    // SQ=0 bypasses hardware squelch, so use AFSK DCD alone.
+    rfCarrierDetected = appliedModuleSquelch > 0 && digitalRead(hw.pins.pinSq) == LOW;
+  } else {
+    rfCarrierDetected = softSquelchEffect.isCarrierDetected();
+  }
   bool channelBusy = ourTx || afskDcd || rfCarrierDetected;
   bool channelClear = !channelBusy;
   if (!ax25TxScheduler.ready(now, channelClear, (uint8_t)esp_random())) {

@@ -121,12 +121,14 @@ public class SettingsActivity extends AppCompatActivity {
         hasHighLowPowerSwitch = getIntent().getBooleanExtra("hasHighLowPowerSwitch", false);
         firmwareVersion = getIntent().getIntExtra("firmwareVersion", -1);
 
-        initialSquelch = getIntent().getIntExtra(EXTRA_SQUELCH, 0);
         initialEmphasis = getIntent().getBooleanExtra(EXTRA_FILTER_PRE, false);
         initialHighpass = getIntent().getBooleanExtra(EXTRA_FILTER_HIGH, false);
         initialLowpass = getIntent().getBooleanExtra(EXTRA_FILTER_LOW, false);
 
         setContentView(R.layout.activity_settings);
+        Slider squelchSlider = findViewById(R.id.squelchSlider);
+        initialSquelch = Math.max((int) squelchSlider.getValueFrom(),
+            Math.min((int) squelchSlider.getValueTo(), getIntent().getIntExtra(EXTRA_SQUELCH, 0)));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         populateOriginalValues(() -> {
             attachListeners();
@@ -369,7 +371,7 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void setRadioSettingsFromIntent() {
-        this.<Slider>findViewById(R.id.squelchSlider).setValue(getIntent().getIntExtra(EXTRA_SQUELCH, 0));
+        this.<Slider>findViewById(R.id.squelchSlider).setValue(initialSquelch);
         this.<Switch>findViewById(R.id.emphasisSwitch).setChecked(getIntent().getBooleanExtra(EXTRA_FILTER_PRE, false));
         this.<Switch>findViewById(R.id.highpassSwitch).setChecked(getIntent().getBooleanExtra(EXTRA_FILTER_HIGH, false));
         this.<Switch>findViewById(R.id.lowpassSwitch).setChecked(getIntent().getBooleanExtra(EXTRA_FILTER_LOW, false));
