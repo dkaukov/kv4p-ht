@@ -27,6 +27,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <driver/dac.h>
 #endif
 #include <esp_task_wdt.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <dsps_fir.h>
+// The IDF 4 S3 optimized FIR requires a tap count divisible by four;
+// the AFSK and software squelch filters use odd tap counts.
+#undef dsps_fir_f32
+#define dsps_fir_f32 dsps_fir_f32_ansi
+#undef dsps_fird_f32
+#define dsps_fird_f32 dsps_fird_f32_ansi
+#endif
 #include <AfskDemodulator.h>
 #include <FreeDv2400b.h>
 #include <math.h>
@@ -187,10 +196,13 @@ S3AdcStream in;
 AnalogAudioStream in;
 #endif
 AudioInfo rxInfo(AUDIO_SAMPLE_RATE, 1, 16);
-// The ESP32 ADC/I2S clock was measured about 400 samples/s slow. Request the
-// nominal 48 kHz rate plus that correction so the captured stream is near
-// 48 kHz in real time; the DSP and wire formats remain 48 kHz.
+// The classic ESP32 ADC/I2S clock was measured about 400 samples/s slow.
+// The S3 uses a different ADC DMA clock, so do not apply that measurement.
+#if CONFIG_IDF_TARGET_ESP32
 static const uint32_t RX_ADC_SAMPLE_RATE_CORRECTION = 400;
+#else
+static const uint32_t RX_ADC_SAMPLE_RATE_CORRECTION = 0;
+#endif
 static const uint32_t RX_ADC_SAMPLE_RATE =
     AUDIO_SAMPLE_RATE + RX_ADC_SAMPLE_RATE_CORRECTION;
 AudioInfo rxAudioInfo(AUDIO_WIRE_SAMPLE_RATE, 1, 16);
@@ -245,6 +257,11 @@ void initI2SRx() {
 #endif
   // effects
   effects.clear();
+  if (!effects.begin(rxInfo)) {
+    _LOGE("RX effects initialization failed");
+    in.end();
+    return;
+  }
   afskTapEffect.setActive(true);
   effects.addEffect(dcOffsetRemover);
   effects.addEffect(gain);
@@ -253,7 +270,6 @@ void initI2SRx() {
   effects.addEffect(freeDvTapEffect);
   effects.addEffect(softSquelchEffect);
   effects.addEffect(mute);
-  effects.begin(rxInfo);
   // open output
   rxDownsample.begin();
   rxOut.begin(rxAudioInfo);

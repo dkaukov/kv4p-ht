@@ -497,7 +497,7 @@ void handleRadioResult(const RadioModule::Result &result) {
           if (hw.rfModuleType == RF_SA518_DUAL) {
             rssi = rssi / 2 - 30;
           }
-          _LOGD("Radio RSSI response: %d", rssi);
+          //_LOGD("Radio RSSI response: %d", rssi);
           if (latestRssi != rssi) latestRssi = rssi;
         }
         break;

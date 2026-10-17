@@ -23,6 +23,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <esp_task_wdt.h>
 #include <AfskModulator.h>
 #include <FreeDv2400b.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <hal/misc.h>
+#include <soc/i2s_struct.h>
+#endif
 #include "globals.h"
 #include "protocol.h"
 #include "state.h"
@@ -102,6 +106,30 @@ static void onFreeDvTxSamples(const int16_t *samples, size_t count) {
 FreeDv2400bModulator freeDvTx(onFreeDvTxSamples);
 int16_t freeDvTxScratch[256];
 
+#if CONFIG_IDF_TARGET_ESP32S3
+static void applyS3PdmClockDivider() {
+  static_assert(AUDIO_SAMPLE_RATE == 48000, "Update the S3 PDM divider for the new sample rate");
+  // IDF 4 selects the S3's 160 MHz source with integer divider 3 and no
+  // fraction, yielding 52.08 kHz PCM instead of 48 kHz. PDM TX needs an
+  // MCLK of 48000 * 128 * 8 = 49.152 MHz. 160 / 49.152 = 3 + 49/192.
+  // Encode the 49/192 fraction using the S3's IDF 4 divider fields.
+  static constexpr uint32_t div = 3;
+  static constexpr uint32_t x = 192 / 49 - 1;
+  static constexpr uint32_t y = 192 % 49 + 1;
+  static constexpr uint32_t z = 49;
+  HAL_FORCE_MODIFY_U32_REG_FIELD(I2S0.tx_clkm_conf, tx_clkm_div_num, 2);
+  I2S0.tx_clkm_div_conf.tx_clkm_div_yn1 = 0;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_y = 1;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_z = 0;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_x = 0;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_yn1 = 0;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_z = z;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_y = y;
+  I2S0.tx_clkm_div_conf.tx_clkm_div_x = x;
+  HAL_FORCE_MODIFY_U32_REG_FIELD(I2S0.tx_clkm_conf, tx_clkm_div_num, div);
+}
+#endif
+
 void initI2STx() {  
   freeDvTx.setMagnitude(16383);
   auto config = out.defaultConfig(TX_MODE);
@@ -110,13 +138,31 @@ void initI2STx() {
 #if CONFIG_IDF_TARGET_ESP32S3
   config.pin_ws = -1;
   config.pin_bck = -1;
+  // Audio Tools 1.2.3 otherwise keeps the legacy driver's stereo default and
+  // duplicates each mono PCM sample before PDM conversion.
+  config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
 #else
   config.pin_ws = 27;
 #endif
+  config.use_apll = false;
+#if CONFIG_IDF_TARGET_ESP32
   config.use_apll = true;
+#endif
   config.auto_clear = false;
   config.signal_type = PDM;
   out.begin(config);
+#if CONFIG_IDF_TARGET_ESP32S3
+  // IDF 5 applies the divider sequence before enabling the channel. Legacy
+  // I2SStream has already started it, so stop and restart around the update.
+  if (i2s_stop(I2S_NUM_0) == ESP_OK) {
+    applyS3PdmClockDivider();
+    if (i2s_start(I2S_NUM_0) != ESP_OK) {
+      _LOGE("S3 PDM clock restart failed");
+    }
+  } else {
+    _LOGE("S3 PDM clock stop failed");
+  }
+#endif
   txUpsample.begin();
   txVolumeMeter.begin(txAudioInfo);
   if (!txDecodeStreamStarted) {
