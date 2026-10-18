@@ -1462,6 +1462,7 @@ public class MainActivity extends AppCompatActivity {
         TextView snackbarTextView = (TextView) usbSnackbar.getView().findViewById(com.google.android.material.R.id.snackbar_text);
         snackbarTextView.setTextSize(20);
 
+        usbSnackbar.setAnchorViewLayoutListenerEnabled(true);
         usbSnackbar.show();
     }
 
@@ -1562,15 +1563,15 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("MissingPermission")
     public void singleBeaconButtonClicked(View view) {
-        if (null != radioAudioService && !radioAudioService.isTxAllowed()) {
-            showSimpleSnackbar(getString(R.string.can_t_tx_outside_ham_band));
-            return;
-        }
         if (null == callsign || callsign.trim().isEmpty()) {
             showCallsignSnackbar(getString(R.string.set_your_callsign_to_beacon_your_position));
             return;
         }
         if (null == radioAudioService) {
+            return;
+        }
+        if (!radioAudioService.canTransmitPositionBeacon()) {
+            showSimpleSnackbar(getString(R.string.can_t_tx_outside_ham_band));
             return;
         }
         ensurePermissions(List.of(Manifest.permission.ACCESS_FINE_LOCATION), allGranted -> {
