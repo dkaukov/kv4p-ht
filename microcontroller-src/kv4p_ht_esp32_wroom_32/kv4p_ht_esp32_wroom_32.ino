@@ -100,12 +100,13 @@ char radioStatus() {
 }
 
 float moduleMinRadioFreq() {
-  return hw.rfModuleType == RF_SA818_UHF ? 400.0f : 134.0f;
+  return hw.rfModuleType == RF_SA818_UHF ? 400.0f :
+    hw.rfModuleType == RF_SA518_DUAL ? 136.0f : 134.0f;
 }
 
 float moduleMaxRadioFreq() {
   return hw.rfModuleType == RF_SA818_UHF ? 480.0f :
-    hw.rfModuleType == RF_SA518_DUAL ? 470.0f : 174.0f;
+    hw.rfModuleType == RF_SA518_DUAL ? 480.0f : 174.0f;
 }
 
 float moduleDefaultRadioFreq() {
@@ -461,14 +462,17 @@ void handleRadioResult(const RadioModule::Result &result) {
   switch (result.command) {
       case RadioModule::FILTER:
         radioFilterPending = false;
+        attemptedFilterFlags = pendingFilterFlags;
+        filtersAttempted = true;
         if (result.ok) {
           lastDeviceStateError = DEVICE_STATE_ERROR_NONE;
+          appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | pendingFilterFlags;
+          filtersApplied = true;
         } else {
           lastDeviceStateError = DEVICE_STATE_ERROR_FILTERS_FAILED;
+          filtersApplied = false;
         }
         // A failed filter command must not prevent channel setup or USB HELLO.
-        appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) | pendingFilterFlags;
-        filtersApplied = true;
         break;
       case RadioModule::GROUP:
         radioGroupPending = false;
@@ -506,10 +510,11 @@ void handleRadioResult(const RadioModule::Result &result) {
         break;
       case RadioModule::RSSI:
         if (result.ok) {
-          uint8_t rssi = result.value;
+          int rssiValue = result.value;
           if (hw.rfModuleType == RF_SA518_DUAL) {
-            rssi = rssi / 2 - 30;
+            rssiValue = max(0, rssiValue / 2 - 30);
           }
+          uint8_t rssi = static_cast<uint8_t>(rssiValue);
           //_LOGD("Radio RSSI response: %d", rssi);
           if (latestRssi != rssi) latestRssi = rssi;
         }
@@ -534,11 +539,13 @@ void radioLoop() {
   if (!radioFound || ax25OverrideChannelPrepared || ax25OverrideInProgress) return;
 
   uint16_t filterFlags = desiredFilterFlags();
-  uint16_t appliedFilterFlags = appliedState.flags &
-    (HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW);
-  if (!radioFilterPending && (!filtersApplied || filterFlags != appliedFilterFlags)) {
+  if (!radioFilterPending && (!filtersAttempted || filterFlags != attemptedFilterFlags)) {
     rxDownsample.setFilters((filterFlags & HOST_STATE_FILTER_HIGH) != 0,
                             (filterFlags & HOST_STATE_FILTER_LOW) != 0);
+    // These two filters are local DSP settings; only pre-emphasis waits for
+    // the radio module's acknowledgment.
+    appliedState.flags = (appliedState.flags & ~(HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW)) |
+      (filterFlags & (HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW));
     pendingFilterFlags = filterFlags;
     radioFilterPending = true;
     radio.filter((filterFlags & HOST_STATE_FILTER_PRE) != 0);
@@ -751,8 +758,7 @@ void rssiLoop() {
         }
       } else if (mode == MODE_RX && !freeDv2400bEnabled() &&
                  radioFound && !radio.busy() && !radioConfigChanged() &&
-                 filtersApplied && desiredFilterFlags() ==
-                   (appliedState.flags & (HOST_STATE_FILTER_PRE | HOST_STATE_FILTER_HIGH | HOST_STATE_FILTER_LOW))) {
+                 filtersAttempted && desiredFilterFlags() == attemptedFilterFlags) {
         radio.rssi();
       }
     }

@@ -53,11 +53,12 @@ public:
   }
   static bool validFrequency(RfModuleType type, float mhz) {
     if (!isfinite(mhz)) return false;
-    bool vhf = mhz >= 134.0f && mhz <= 174.0f;
+    bool vhf818 = mhz >= 134.0f && mhz <= 174.0f;
+    bool vhf518 = mhz >= 136.0f && mhz <= 174.0f;
     switch (type) {
-      case RF_SA818_VHF: return vhf;
+      case RF_SA818_VHF: return vhf818;
       case RF_SA818_UHF: return mhz >= 400.0f && mhz <= 480.0f;
-      case RF_SA518_DUAL: return vhf || (mhz >= 400.0f && mhz <= 470.0f);
+      case RF_SA518_DUAL: return vhf518 || (mhz >= 400.0f && mhz <= 480.0f);
       default: return false;
     }
   }

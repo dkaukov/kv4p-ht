@@ -842,10 +842,10 @@ public class RadioAudioService extends Service {
     private boolean canTransmitOnFrequency(float freq) {
         final float halfBandwidth = radioModule.getHalfBandwidthMhz();
         if (getRadioType() == RadioModuleType.DUAL) {
-            return (freq >= Math.max(min2mTxFreq, 134.0f) + halfBandwidth
+            return (freq >= Math.max(min2mTxFreq, 136.0f) + halfBandwidth
                     && freq <= Math.min(max2mTxFreq, 174.0f) - halfBandwidth)
                 || (freq >= Math.max(min70cmTxFreq, 400.0f) + halfBandwidth
-                    && freq <= Math.min(max70cmTxFreq, 470.0f) - halfBandwidth);
+                    && freq <= Math.min(max70cmTxFreq, 480.0f) - halfBandwidth);
         }
         return  (freq >= (minTxFreq + halfBandwidth)) && (freq <= (maxTxFreq - halfBandwidth));
     }
@@ -1601,7 +1601,8 @@ public class RadioAudioService extends Service {
     }
 
     public float getMinRadioFreq() {
-        return radioModule.getMinRadioFreq();
+        float minimum = radioModule.getMinRadioFreq();
+        return getRadioType() == RadioModuleType.DUAL ? Math.max(minimum, 136.0f) : minimum;
     }
 
     public float getMaxRadioFreq() {

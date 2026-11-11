@@ -122,8 +122,8 @@ public class MemoriesAdapter extends RecyclerView.Adapter<MemoriesAdapter.Memory
 
     private boolean frequencyFitsBand(float frequency) {
         if (dualBandFilter) {
-            return (frequency >= 134.0f && frequency <= 174.0f)
-                || (frequency >= 400.0f && frequency <= 470.0f);
+            return (frequency >= 136.0f && frequency <= 174.0f)
+                || (frequency >= 400.0f && frequency <= 480.0f);
         }
         return frequency >= minRadioFreq && frequency <= maxRadioFreq;
     }

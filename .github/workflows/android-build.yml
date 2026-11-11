@@ -125,7 +125,7 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk \
             "../../pr-dist/kv4p-ht-pr-$PR_NUMBER.apk"
           install -m 0644 \
-            ../../.pr-firmware/firmware.bin \
+            ../../.pr-firmware/esp32.bin \
             "../../pr-dist/firmware-pr-$PR_NUMBER.bin"
           cd ../../pr-dist
           sha256sum \

@@ -74,10 +74,13 @@ public class RadioAudioServiceTest {
     }
 
     @Test public void dualBandAllowsBothHamBandsAndClampsUnsupportedGap() {
-        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 470f);
+        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 480f);
         assertEquals(RadioAudioService.RadioModuleType.DUAL, service.getRadioType());
+        assertEquals(136.0f, service.getMinRadioFreq(), 0.0001f);
+        assertEquals("136.0000", service.validateFrequency("135"));
         assertEquals("174.0000", service.validateFrequency("200"));
         assertEquals("400.0000", service.validateFrequency("390"));
+        assertEquals("480.0000", service.validateFrequency("490"));
         service.setMode(RadioMode.RX);
         service.tuneToFreq("146.5200");
         assertTrue(service.isTxAllowed());
@@ -257,7 +260,7 @@ public class RadioAudioServiceTest {
     }
 
     @Test public void dualBandScanSkipsFrequenciesBetweenBands() {
-        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 470f);
+        selectBand(Protocol.RfModuleType.RF_SA518_DUAL, 134f, 480f);
         service.setChannelMemories(new MutableLiveData<>(List.of(
             memory(1, "200.0000"), memory(2, "435.0000"), memory(3, "146.5200"))));
         service.setMode(RadioMode.RX);

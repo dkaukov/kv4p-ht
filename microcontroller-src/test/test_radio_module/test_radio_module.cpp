@@ -39,10 +39,14 @@ public:
 };
 
 void test_frequency_limits_use_module_enum() {
+  TEST_ASSERT_TRUE(RadioModule::validFrequency(RF_SA818_VHF, 134.0f));
+  TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA518_DUAL, 135.999f));
+  TEST_ASSERT_TRUE(RadioModule::validFrequency(RF_SA518_DUAL, 136.0f));
   TEST_ASSERT_TRUE(RadioModule::validFrequency(RF_SA518_DUAL, 144.0f));
   TEST_ASSERT_TRUE(RadioModule::validFrequency(RF_SA518_DUAL, 435.0f));
   TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA518_DUAL, 200.0f));
-  TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA518_DUAL, 480.0f));
+  TEST_ASSERT_TRUE(RadioModule::validFrequency(RF_SA518_DUAL, 480.0f));
+  TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA518_DUAL, 480.001f));
   TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA818_VHF, 435.0f));
   TEST_ASSERT_FALSE(RadioModule::validFrequency(RF_SA818_UHF, 144.0f));
   TEST_ASSERT_FALSE(RadioModule::validFrequency(static_cast<RfModuleType>(99), 144.0f));
@@ -56,7 +60,7 @@ void test_begin_uses_bounded_handshake_retries() {
   TEST_ASSERT_FALSE(radio.begin(RF_SA818_VHF, 2));
   TEST_ASSERT_EQUAL_UINT32(2250, nativeTestMillis);
   TEST_ASSERT_EQUAL_STRING("AT+DMOCONNECT\r\nAT+DMOCONNECT\r\n", port.sent.c_str());
-  delay(2000);
+  delay(10000);
   radio.loop();
   TEST_ASSERT_EQUAL_STRING("AT+DMOCONNECT\r\nAT+DMOCONNECT\r\n", port.sent.c_str());
 }
